@@ -53,22 +53,33 @@ class ConversationLoop:
 
     # ── 对外唯一入口 ────────────────────────────────────────────────────
 
-    def run(self, user_message: Any, system_prompt: Optional[str] = None) -> dict:
+    def run(
+        self,
+        user_message: Any,
+        system_prompt: Optional[str] = None,
+        initial_messages: Optional[list[dict]] = None,
+    ) -> dict:
         """执行一个完整回合。
 
         Args:
             user_message: 用户输入（str 或多模态 parts 列表）
             system_prompt: 覆盖默认系统提示词（可选）
+            initial_messages: 初始消息列表（用于恢复 session）
 
         Returns:
             {"final_response": str, "messages": [...], "api_calls": int,
              "tool_calls": int, "exit_reason": str, "error": str|None}
         """
         # ── 回合准备（只做一次）───────────────────────────────────────
-        clean_message = sanitize_user_message(user_message)
-        messages = MessageStore(
-            build_initial_messages(clean_message, self.tools.schemas(), system_prompt)
-        )
+        if initial_messages is not None:
+            # 恢复 session：追加用户消息
+            messages = MessageStore(list(initial_messages))  # 拷贝避免修改原数据
+            messages.append({"role": "user", "content": sanitize_user_message(user_message)})
+        else:
+            clean_message = sanitize_user_message(user_message)
+            messages = MessageStore(
+                build_initial_messages(clean_message, self.tools.schemas(), system_prompt)
+            )
         self.controller.reset()
 
         # ── 核心循环（骨架）───────────────────────────────────────────
