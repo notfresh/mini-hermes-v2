@@ -53,6 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="列出已注册的工具")
     parser.add_argument("--personality", default="",
                         help="追加到系统提示词的性格/约束描述")
+    parser.add_argument("-i", "--interactive", action="store_true",
+                        help="交互模式（REPL）")
     return parser
 
 
@@ -78,6 +80,24 @@ def main() -> None:
         print("   export DEEPSEEK_API_KEY=sk-xxx   # DeepSeek")
         print("   export OPENAI_API_KEY=sk-xxx     # OpenAI")
         sys.exit(1)
+
+    # ── 交互模式 ─────────────────────────────────────────────────────
+    if args.interactive:
+        from session_manager import run_repl
+        tools_runner = ToolRunner(verbose=args.verbose)
+        llm = LLMClient(
+            model=args.model,
+            base_url=base_url,
+            api_key=api_key,
+            verbose=args.verbose,
+        )
+        run_repl(
+            tools_runner=tools_runner,
+            llm=llm,
+            verbose=args.verbose,
+            max_turns=args.max_turns,
+        )
+        return
 
     # ── 消息 ──
     message = args.message
