@@ -229,17 +229,20 @@ def run_repl(
 
         if not user_input:
             continue
-
+        
+        # 退出命令
+        if user_input.lower() in ("/exit", "/quit"):
+            print("退出 REPL。")
+            session.save(manager.base_dir)
+            print(REPL_SAVED)
+            break
+        
         # 处理命令
         if user_input.startswith("/"):
             _handle_command(user_input, session, manager, loop)
             continue
 
-        # 退出命令
-        if user_input.lower() in ("exit", "quit"):
-            session.save(manager.base_dir)
-            print(REPL_SAVED)
-            break
+
 
         # 正常对话
         result = loop.run(
