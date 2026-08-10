@@ -24,6 +24,8 @@ from typing import Dict, List, Optional
 
 SKILL_FILE = "SKILL.md"
 FM_START = "---"
+# 技能总开关的约定名（bootstrap 技能；与 Superpowers 原版一致）
+BOOTSTRAP_SKILL = "using-superpowers"
 
 
 class SkillRegistry:
@@ -81,6 +83,14 @@ class SkillRegistry:
         if meta is None:
             return None
         return pathlib.Path(meta["path"]).read_text(encoding="utf-8")
+
+    def has_bootstrap(self) -> bool:
+        """技能包是否自带"技能总开关"（using-superpowers）。
+
+        约定优于配置：宿主检测到总开关技能存在，就在会话开始时
+        把它注入（Superpowers 式启动注入）。
+        """
+        return self.has_skill(BOOTSTRAP_SKILL)
 
     def index_text(self) -> str:
         """生成技能索引文本（Hermes 式：只列 name + description）。

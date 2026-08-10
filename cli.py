@@ -77,7 +77,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-skills", action="store_true",
                         help="禁用技能框架（回到无技能的 V2 原版行为）")
     parser.add_argument("--skills-dir", default="",
-                        help="自定义技能目录（默认使用项目内 skills/）")
+                        help="挂载外部技能包目录（如 ../minimal-superpowers/skills；"
+                             "自带 using-superpowers 时自动注入总开关）")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="交互模式（REPL）")
     return parser
@@ -125,8 +126,8 @@ def main() -> None:
             api_key=api_key,
             verbose=args.verbose,
         )
-        # 技能框架挂载：注册表注入（--no-skills 可关闭）
-        skills = None if args.no_skills else SkillRegistry(args.skills_dir or None)
+        # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）
+        skills = None if (args.no_skills or not args.skills_dir) else SkillRegistry(args.skills_dir)
         if skills is not None:
             tools.set_registry(skills)
             _print_skills(skills)
@@ -160,8 +161,8 @@ def main() -> None:
         verbose=args.verbose,
     )
     controller = LoopController(max_turns=args.max_turns, verbose=args.verbose)
-    # 技能框架挂载：注册表注入（--no-skills 可关闭）
-    skills = None if args.no_skills else SkillRegistry(args.skills_dir or None)
+    # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）
+    skills = None if (args.no_skills or not args.skills_dir) else SkillRegistry(args.skills_dir)
     if skills is not None:
         tools.set_registry(skills)
         _print_skills(skills)

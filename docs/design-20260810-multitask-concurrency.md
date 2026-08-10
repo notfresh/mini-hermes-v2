@@ -1,9 +1,22 @@
-# MinimalAgentV2 多任务并发设计文档（草案 v0.2）
+# MinimalAgentV2 多任务并发设计文档（路线图，非实现计划）
 
-> 状态：**讨论稿，未实现**（用户要求先讨论方案）
+> 状态：**讨论定稿——当前不实现任何新模块**（2026-08-10 讨论结论）
 > 基线：V2.0（tag v2.0，五模块拆分）
 > 设计依据：001study/hermes-concurrency-isolation-report.md（Hermes 并发机制调查）
-> v0.2 修订：吸收讨论结论——**不新增 session_registry/session_store**，延续升级现有 session_manager.py（它已承担 Session CRUD + 持久化）；只新增 task_scheduler.py 一个模块。
+> 定位：本文档是**路线图/备查**，不是本期实现计划。V2 当前架构（单会话 CLI）无需任何并发机制。
+
+---
+
+## 0. 讨论结论（定稿）
+
+1. **当前什么都不做**。V2 是单进程单会话 CLI，没有并发需求；Task Scheduler 引入 = 提前设计（YAGNI）。
+2. **存储维持现状**：每会话独立 JSON 文件 = 文件级隔离，零锁零竞争，比 SQLite 更彻底。不上 SQLite。
+3. **session_manager 延续升级**：方向认同（Session → AgentSession 持有五模块实例），但**同样等需求再动**，不提前改。
+4. **Task Scheduler 挂起**：等出现「两个以上并发任务 + 同一份可变资源」两个条件同时满足时，再按 §4.2 实现。
+5. **共享资源判据**（决定未来是否需要调度的试金石）：
+   - 进程内：内存可变状态、env、日志、终端
+   - 机器级：文件系统、端口、数据库
+   - 账户级（最隐蔽）：LLM API 配额、外部 API 限流、凭据池
 
 ---
 

@@ -26,11 +26,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from bootstrap_injector import BootstrapInjector
 from llm_client import LLMClient, LLMError, normalize_assistant_message
 from loop_controller import LoopController
 from message_store import MessageStore
-from skill_registry import SkillRegistry
+from skill_registry import BOOTSTRAP_SKILL, SkillRegistry
 from tool_runner import ToolRunner
 from turn_context import build_initial_messages, sanitize_user_message
 
@@ -60,8 +59,8 @@ class ConversationLoop:
         self.tools = tools
         self.controller = controller or LoopController(max_turns=10, verbose=verbose)
         self.skills = skills
-        # 技能框架：bootstrap 注入器（会话开始注入"技能总开关"，只一次）
-        self.injector = BootstrapInjector(skills) if skills is not None else None
+        # 技能框架：bootstrap 注入状态（每会话只注入一次"技能总开关"）
+        self._bootstrap_injected = False
         self.max_context_tokens = max_context_tokens
         self.verbose = verbose
         self.stats = {"api_calls": 0, "tool_calls": 0, "compressions": 0}
@@ -92,11 +91,12 @@ class ConversationLoop:
             messages.append({"role": "user", "content": sanitize_user_message(user_message)})
         else:
             clean_message = sanitize_user_message(user_message)
-            # 技能框架注入（对应 kimi 回合循环里的 DynamicInjector.inject()）：
-            #   bootstrap = "技能总开关"全文（已注入过则返回空串，只注入一次）
+            # 技能框架注入（宿主对"外来技能包"的约定适配）：
             #   index     = 技能索引列表（Hermes 式 <available_skills> 块）
-            skill_bootstrap = self.injector.build() if self.injector else ""
+            #   bootstrap = "技能总开关"全文（仅当技能包自带 using-superpowers
+            #               且本会话还没注入过——Superpowers 式启动注入）
             skills_index = self.skills.index_text() if self.skills else ""
+            skill_bootstrap = self._build_bootstrap()
             messages = MessageStore(
                 build_initial_messages(
                     clean_message,
@@ -107,10 +107,8 @@ class ConversationLoop:
                 )
             )
             # 注入标记：system 消息带 origin（会话恢复时据此跳过重复注入）
-            if skill_bootstrap and self.injector is not None:
-                system_msg = messages.all()[0]
-                system_msg["origin"] = {"kind": "injection", "variant": "plugin_session_start"}
-                self.injector.mark_injected(0)
+            if skill_bootstrap:
+                messages.all()[0]["origin"] = {"kind": "injection", "variant": "plugin_session_start"}
         self.controller.reset()
 
         # ── 核心循环（骨架）───────────────────────────────────────────
@@ -147,6 +145,38 @@ class ConversationLoop:
 
         # 循环退出（预算/上限/中断）
         return self._timeout_result(messages)
+
+    # ── 技能框架：bootstrap 注入（宿主约定适配）──────────────────────────
+
+    def _build_bootstrap(self) -> str:
+        """生成"技能总开关"文本；本会话已注入过则返回空串。
+
+        约定优于配置：外部技能包若自带 using-superpowers 技能，
+        宿主就在会话开始时把它注入（<EXTREMELY_IMPORTANT> 包裹），
+        强制模型"先查技能再行动"。对应：
+          - Superpowers hooks/session-start（bootstrap 注入脚本）
+          - Kimi Code plugin-session-start.ts（sessionStart 技能注入）
+        去重：_bootstrap_injected 标记 + 会话恢复时消息里的 origin 标记。
+        """
+        if self.skills is None or self._bootstrap_injected:
+            return ""
+        if not self.skills.has_bootstrap():
+            return ""
+        content = self.skills.load(BOOTSTRAP_SKILL)
+        if content is None:
+            return ""
+        self._bootstrap_injected = True
+        return (
+            "<EXTREMELY_IMPORTANT>\n"
+            "You have superpowers.\n"
+            "\n"
+            "Below is the full content of your 'superpowers:using-superpowers' "
+            "skill — your introduction to using skills. "
+            "For all other skills, use the load_skill tool:\n"
+            "\n"
+            f"{content}\n"
+            "</EXTREMELY_IMPORTANT>"
+        )
 
     # ── 结果组装 ────────────────────────────────────────────────────────
 
