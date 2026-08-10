@@ -23,11 +23,13 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_system_prompt(tool_schemas: list[dict], personality: str = "") -> str:
-    """构建系统提示词，注入当前注册的工具描述。
+def build_system_prompt(tool_schemas: list[dict], personality: str = "", skills_index: str = "") -> str:
+    """构建系统提示词，注入当前注册的工具描述 + 技能索引。
 
     Hermes 对应: agent/prompt_builder.py — 动态注入工具定义 + skills + 记忆。
-    教学版只注入工具列表，Hermes 还会注入技能索引、记忆摘要、平台提示等。
+    教学版原版只注入工具列表（skills_index 默认为空）；
+    传入技能索引时，追加 <available_skills> 块——这就是"技能框架挂载点"：
+    让模型知道有哪些技能、什么场景该加载哪个（渐进式披露，全文按需加载）。
     """
     if not tool_schemas:
         tool_summary = "（当前没有可用工具）"
@@ -50,6 +52,8 @@ def build_system_prompt(tool_schemas: list[dict], personality: str = "") -> str:
 3. 如果一次需要多个独立操作，可以同时调用多个工具
 4. 用中文回复用户"""
 
+    if skills_index:
+        base += f"\n\n{skills_index}"
     if personality:
         base += f"\n\n{personality}"
     return base
@@ -60,13 +64,19 @@ def build_initial_messages(
     tool_schemas: list[dict],
     system_prompt_override: str | None = None,
     personality: str = "",
+    skill_bootstrap: str = "",
+    skills_index: str = "",
 ) -> list[dict]:
     """组装回合初始 messages：system + user。
 
     Hermes 对应: build_turn_context() 返回的 ctx.messages。
-    教学版固定两段（system + user）；Hermes 还会注入记忆、技能、历史对话。
+    教学版原版固定两段（system + user）；挂载技能框架时：
+      - skills_index:   技能索引（<available_skills> 块）拼进系统提示词
+      - skill_bootstrap:"技能总开关"全文拼进系统提示词（Superpowers 式启动注入）
     """
-    system_prompt = system_prompt_override or build_system_prompt(tool_schemas, personality)
+    system_prompt = system_prompt_override or build_system_prompt(tool_schemas, personality, skills_index)
+    if skill_bootstrap:
+        system_prompt = system_prompt + "\n\n" + skill_bootstrap
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},

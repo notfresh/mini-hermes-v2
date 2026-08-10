@@ -26,27 +26,42 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from bootstrap_injector import BootstrapInjector
 from llm_client import LLMClient, LLMError, normalize_assistant_message
 from loop_controller import LoopController
 from message_store import MessageStore
+from skill_registry import SkillRegistry
 from tool_runner import ToolRunner
 from turn_context import build_initial_messages, sanitize_user_message
 
 
 class ConversationLoop:
-    """核心循环骨架。一次 run() = 一个完整回合（可能多轮工具调用）。"""
+    """核心循环骨架。一次 run() = 一个完整回合（可能多轮工具调用）。
+
+    Args:
+        llm: 模型客户端
+        tools: 工具执行器
+        controller: 循环控制器（轮数/预算/中断）
+        skills: 技能注册表（技能框架挂载点；None = 不启用技能框架）
+        max_context_tokens: 触发压缩的 token 阈值
+        verbose: 打印详细调试信息
+    """
 
     def __init__(
         self,
         llm: LLMClient,
         tools: ToolRunner,
         controller: Optional[LoopController] = None,
+        skills: Optional[SkillRegistry] = None,
         max_context_tokens: int = 8000,
         verbose: bool = False,
     ):
         self.llm = llm
         self.tools = tools
         self.controller = controller or LoopController(max_turns=10, verbose=verbose)
+        self.skills = skills
+        # 技能框架：bootstrap 注入器（会话开始注入"技能总开关"，只一次）
+        self.injector = BootstrapInjector(skills) if skills is not None else None
         self.max_context_tokens = max_context_tokens
         self.verbose = verbose
         self.stats = {"api_calls": 0, "tool_calls": 0, "compressions": 0}
@@ -77,9 +92,25 @@ class ConversationLoop:
             messages.append({"role": "user", "content": sanitize_user_message(user_message)})
         else:
             clean_message = sanitize_user_message(user_message)
+            # 技能框架注入（对应 kimi 回合循环里的 DynamicInjector.inject()）：
+            #   bootstrap = "技能总开关"全文（已注入过则返回空串，只注入一次）
+            #   index     = 技能索引列表（Hermes 式 <available_skills> 块）
+            skill_bootstrap = self.injector.build() if self.injector else ""
+            skills_index = self.skills.index_text() if self.skills else ""
             messages = MessageStore(
-                build_initial_messages(clean_message, self.tools.schemas(), system_prompt)
+                build_initial_messages(
+                    clean_message,
+                    self.tools.schemas(),
+                    system_prompt_override=system_prompt,
+                    skill_bootstrap=skill_bootstrap,
+                    skills_index=skills_index,
+                )
             )
+            # 注入标记：system 消息带 origin（会话恢复时据此跳过重复注入）
+            if skill_bootstrap and self.injector is not None:
+                system_msg = messages.all()[0]
+                system_msg["origin"] = {"kind": "injection", "variant": "plugin_session_start"}
+                self.injector.mark_injected(0)
         self.controller.reset()
 
         # ── 核心循环（骨架）───────────────────────────────────────────

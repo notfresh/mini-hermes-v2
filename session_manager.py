@@ -187,8 +187,13 @@ def run_repl(
     llm: "LLMClient",
     verbose: bool = False,
     max_turns: int = 10,
+    skills: "Optional[SkillRegistry]" = None,
 ) -> None:
-    """REPL 主循环"""
+    """REPL 主循环
+
+    Args:
+        skills: 技能注册表（技能框架挂载点；None = 不启用）
+    """
     from conversation_loop import ConversationLoop
     from loop_controller import LoopController
 
@@ -198,6 +203,7 @@ def run_repl(
         llm=llm,
         tools=tools_runner,
         controller=controller,
+        skills=skills,
         verbose=verbose,
     )
 

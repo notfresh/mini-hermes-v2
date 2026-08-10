@@ -24,13 +24,34 @@ from llm_client import LLMClient
 from loop_controller import LoopController
 import tools  # noqa: F401  # import 即触发 @tool 注册
 from tool_runner import ToolRunner, _TOOL_SCHEMAS
+from skill_registry import SkillRegistry
 
 
 def _resolve_api_key(base_url: str) -> str:
-    """从环境变量找 API key（传承 V1）。"""
+    """从环境变量找 API key（传承 V1）；找不到再读 Hermes 配置。
+
+    技能框架挂载版补充：用户环境未 export key 时，复用
+    ~/.hermes/config.json 里 Hermes 正在用的 key（openai.api_key，
+    base_url 为 api.deepseek.com/v1 即 DeepSeek）。
+    """
     if "deepseek" in base_url.lower():
-        return os.environ.get("DEEPSEEK_API_KEY", "")
-    return os.environ.get("OPENAI_API_KEY", "")
+        key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if key:
+            return key
+    else:
+        key = os.environ.get("OPENAI_API_KEY", "")
+        if key:
+            return key
+    # 兜底：读 Hermes 配置
+    hermes_cfg = os.path.expanduser("~/.hermes/config.json")
+    if os.path.isfile(hermes_cfg):
+        try:
+            import json
+            cfg = json.loads(open(hermes_cfg).read())
+            return cfg.get("openai", {}).get("api_key", "")
+        except Exception:
+            pass
+    return ""
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,9 +74,22 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="列出已注册的工具")
     parser.add_argument("--personality", default="",
                         help="追加到系统提示词的性格/约束描述")
+    parser.add_argument("--no-skills", action="store_true",
+                        help="禁用技能框架（回到无技能的 V2 原版行为）")
+    parser.add_argument("--skills-dir", default="",
+                        help="自定义技能目录（默认使用项目内 skills/）")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="交互模式（REPL）")
     return parser
+
+
+def _print_skills(skills: SkillRegistry) -> None:
+    """打印已挂载的技能清单（技能框架模式启动时显示）。"""
+    print(f"\n🧠 技能框架已挂载 ({len(skills.list_skills())} 个技能):")
+    for s in skills.list_skills():
+        desc = (s["description"] or "")[:60]
+        print(f"   · {s['name']:<28} {desc}")
+    print(f"{'─'*60}")
 
 
 def main() -> None:
@@ -91,11 +125,17 @@ def main() -> None:
             api_key=api_key,
             verbose=args.verbose,
         )
+        # 技能框架挂载：注册表注入（--no-skills 可关闭）
+        skills = None if args.no_skills else SkillRegistry(args.skills_dir or None)
+        if skills is not None:
+            tools.set_registry(skills)
+            _print_skills(skills)
         run_repl(
             tools_runner=tools_runner,
             llm=llm,
             verbose=args.verbose,
             max_turns=args.max_turns,
+            skills=skills,
         )
         return
 
@@ -120,10 +160,16 @@ def main() -> None:
         verbose=args.verbose,
     )
     controller = LoopController(max_turns=args.max_turns, verbose=args.verbose)
+    # 技能框架挂载：注册表注入（--no-skills 可关闭）
+    skills = None if args.no_skills else SkillRegistry(args.skills_dir or None)
+    if skills is not None:
+        tools.set_registry(skills)
+        _print_skills(skills)
     loop = ConversationLoop(
         llm=llm,
         tools=tools_runner,
         controller=controller,
+        skills=skills,
         verbose=args.verbose,
     )
 
