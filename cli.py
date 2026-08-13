@@ -23,6 +23,7 @@ from conversation_loop import ConversationLoop
 from llm_client import LLMClient
 from loop_controller import LoopController
 import tools  # noqa: F401  # import 即触发 @tool 注册
+import plan_mode  # noqa: F401  # Plan Mode V1：注册 plan 工具（纯提示词规划）
 from tool_runner import ToolRunner, _TOOL_SCHEMAS
 from skill_registry import SkillRegistry
 
