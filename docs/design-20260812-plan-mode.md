@@ -110,3 +110,34 @@ if self.guard is not None:
 - 开分支名：`plan-mode`（或 `plannable`，用户定）
 - ⚠️ V2 当前在 skills-framework 分支，工作区有 conversation_loop.py 1 行未提交改动（疑似用户/他会话的）——开分支前需确认该改动归属
 - 提交用 conventional commits（feat:）
+
+---
+
+## 6. 实现状态（2026-08-13 更新）
+
+### V1 已实现（分支 plan-mode-v1，提交 e06c040）
+
+- `plan` 工具（写计划到 ~/.minimal-agent-v2/plans/）+ system prompt 规划规则
+- 提示词完整包含：阶段目标 + 验收条件 + 阶段验证 + 整体验证
+- 实测：模型主动调 plan → 写带验收条件的计划 → 按阶段执行 → 发现浮点精度问题修复 → 整体验证 ✅
+
+### V2 已实现（分支 plan-mode-v2，本分支）
+
+- `PlanMode` 状态机（is_active / plan_path）+ `enter_plan_mode` / `exit_plan_mode` 工具
+- `plan_guard` 守卫：规划模式激活时 write 只能写计划文件，违规 DENIED（Kimi plan-mode-guard-deny 对齐）
+- ToolRunner 增加 guard 检查点（execute 中、工具执行前）；cli.py 注入
+- 实测（开放任务"CSV 解析工具"）：
+  1. 模型主动 enter_plan_mode → 只读调研（ls/read，零写入）→ write 计划文件（守卫放行）→ exit_plan_mode → 写业务代码 → bash 验证
+  2. 守卫单测 6 场景全过（非规划放行 / 计划文件放行 / 其他文件拒绝 / 只读放行 / 退出恢复 / 执行链拦截）
+  3. 最终 completed，验证结果与手工计算一致（390/395/425、总销量 1210 ✓）
+
+### 已知边缘问题（与 plan mode 无关，V2 原有）
+
+- 上下文超长场景：API 报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`
+  ——疑似 MessageStore 压缩后消息结构错位（tool 消息丢失前置 tool_calls）。规划模式的密集调研（多次 read）会放大触发。
+  排查方向：`message_store.py` 的 compress_if_needed 合并逻辑。
+- 简单任务模型会跳过规划（enter 工具描述明确"不适用简单任务"）——正确行为，非缺陷。
+
+### V3 待办（用户审批 + 多方案 + 动态重规划）
+
+见上文方案 C：exit 审批（approve/revise）、多方案选项、执行中 !plan 重规划。

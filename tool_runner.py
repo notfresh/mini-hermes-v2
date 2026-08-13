@@ -139,6 +139,8 @@ class ToolRunner:
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+        # Plan Mode V2：守卫检查点（None = 不检查）。由 CLI 注入 plan_guard。
+        self.guard = None
 
     # ── 供循环/提示词使用的只读接口 ────────────────────────────────────
 
@@ -204,6 +206,17 @@ class ToolRunner:
 
         if self.verbose:
             print(f"     → {fn_name}({raw_args[:120]})")
+
+        # Plan Mode V2：守卫检查（硬约束——违规调用被拒绝，工具不执行）
+        # 对应 Kimi plan-mode-guard-deny：deny 发生在工具执行前，模型收到错误结果
+        if self.guard is not None:
+            reason = self.guard(fn_name, fn_args)
+            if reason:
+                content = f"错误：{reason}"
+                if self.verbose:
+                    print(f"     🚫 {content}")
+                return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+
         try:
             raw = entry["fn"](**fn_args)
             result = str(raw)

@@ -23,7 +23,8 @@ from conversation_loop import ConversationLoop
 from llm_client import LLMClient
 from loop_controller import LoopController
 import tools  # noqa: F401  # import 即触发 @tool 注册
-import plan_mode  # noqa: F401  # Plan Mode V1：注册 plan 工具（纯提示词规划）
+import plan_mode  # noqa: F401  # Plan Mode：注册 enter/exit_plan_mode 工具
+from plan_mode import plan_guard  # 守卫：规划模式激活时限制 write
 from tool_runner import ToolRunner, _TOOL_SCHEMAS
 from skill_registry import SkillRegistry
 
@@ -121,6 +122,7 @@ def main() -> None:
     if args.interactive:
         from session_manager import run_repl
         tools_runner = ToolRunner(verbose=args.verbose)
+        tools_runner.guard = plan_guard  # Plan Mode V2：注入守卫（硬约束）
         llm = LLMClient(
             model=args.model,
             base_url=base_url,
@@ -155,6 +157,7 @@ def main() -> None:
 
     # ── 组装五模块 ──
     tools_runner = ToolRunner(verbose=args.verbose)
+    tools_runner.guard = plan_guard  # Plan Mode V2：注入守卫（硬约束）
     llm = LLMClient(
         model=args.model,
         base_url=base_url,
