@@ -151,7 +151,7 @@ class ConversationLoop:
     def _build_bootstrap(self) -> str:
         """生成"技能总开关"文本；本会话已注入过则返回空串。
 
-        约定优于配置：外部技能包若自带 using-superpowers 技能，
+        约定优于配置：外部技能包若自带 bootstrap 技能，
         宿主就在会话开始时把它注入（<EXTREMELY_IMPORTANT> 包裹），
         强制模型"先查技能再行动"。对应：
           - Superpowers hooks/session-start（bootstrap 注入脚本）
