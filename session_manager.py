@@ -43,6 +43,7 @@ REPL_SAVED = "会话已保存。再见！"
 REPL_CREATED = "已创建 session: {name}"
 REPL_SWITCHED = "已切换到 session: {name}"
 REPL_DELETED = "已删除 session: {name}"
+REPL_HISTORY_EMPTY = "（该 session 暂无可打印的对话历史）"
 REPL_NOT_FOUND = "Session 不存在: {name}"
 
 
@@ -141,6 +142,15 @@ class SessionManager:
             self._save_index({"sessions": sessions, "active": name})
         return Session(name=name)
 
+    def add_session(self, session: Session) -> Session:
+        """添加已有 session"""
+        index = self._ensure_index()
+        sessions = index.get("sessions", [])
+        if session.name not in sessions:
+            sessions.append(session.name)
+            self._save_index({"sessions": sessions, "active": session.name})
+        return session
+
     def load(self, name: str) -> Optional[Session]:
         """加载已有 session"""
         path = self.sessions_dir / f"{name}.json"
@@ -220,13 +230,16 @@ def run_repl(
     # 2. 获取用户选择
     name = _choose_session(manager, sessions)
     session = manager.load(name)
+    
     if session is None:
         # 纯内存创建：未开始聊天不落盘，第一条对话时才持久化
         session = Session(name=name)
+        
         print(REPL_CREATED.format(name=name))
     else:
+        _print_history(session) 
         manager.set_active(name)
-
+        
     # 3. REPL 循环
     while True:
         try:
@@ -262,10 +275,12 @@ def run_repl(
             user_message=user_input,
             initial_messages=session.messages,
         )
-
+        
         # 保存结果到 session（第一次真实对话才注册索引 + 落盘，幂等）
+        session = manager.add_session(session)
         session.messages = result.get("messages", [])
-        manager.create(session.name)
+        session.updated_at = datetime.now().isoformat()
+        session.add_message("assistant", result.get("final_response", "")) # 保存 assistant 回复
         session.save(manager.base_dir)
 
         # 显示回复
@@ -304,6 +319,21 @@ def _resolve_target(manager: SessionManager, ref: str) -> Optional[str]:
     if 0 <= idx < len(sessions):
         return sessions[idx]
     return None
+
+
+def _print_history(session: Session) -> None:
+    """打印某 session 的对话历史（只展示 user/assistant，隐藏工具/系统轮次）。"""
+    shown = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+    if not shown:
+        print(REPL_HISTORY_EMPTY)
+        return
+    print(f"── 历史对话 ({len(shown)} 条) ──")
+    for i, m in enumerate(shown, 1):
+        role = "💬" if m.get("role") == "user" else "🤖"
+        content = m.get("content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        print(f"  [{i}] {role}: {content}")
 
 
 def _handle_command(
@@ -358,6 +388,7 @@ def _handle_command(
         manager.set_active(target)
         new_session = manager.load(target)
         print(REPL_SWITCHED.format(name=target))
+        _print_history(new_session)
         return new_session
 
     elif cmd == "/delete":
