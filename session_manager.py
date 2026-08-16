@@ -34,7 +34,7 @@ REPL_CHOOSE = "请选择 [1-{count}] 或输入新名字创建: "
 REPL_PROMPT = "[{name}] 💬 "
 
 REPL_HELP = """/new <名字>   - 新建 session
-/switch <名字> - 切换 session
+/switch <名字|序号> - 切换 session（序号需先 /list 查看）
 /list          - 列出所有 session
 /delete <名字> - 删除 session
 /exit, /quit   - 退出"""
@@ -291,6 +291,21 @@ def _choose_session(manager: SessionManager, sessions: list[str]) -> str:
         return choice
 
 
+def _resolve_target(manager: SessionManager, ref: str) -> Optional[str]:
+    """把 /switch 的参数解析成 session 名。
+
+    参数是纯数字时，按 manager.list() 的 1 起始序号映射（与 /list 一致）；
+    否则视为名字原样返回。序号越界或映射不到时返回 None。
+    """
+    if not ref.isdigit():
+        return ref
+    sessions = manager.list()
+    idx = int(ref) - 1
+    if 0 <= idx < len(sessions):
+        return sessions[idx]
+    return None
+
+
 def _handle_command(
     user_input: str,
     session: Session,
@@ -309,7 +324,12 @@ def _handle_command(
 
     if cmd == "/list":
         sessions = manager.list()
-        print("可用的 sessions:", ", ".join(sessions) or "（无）")
+        if not sessions:
+            print(REPL_NO_SESSIONS)
+            return None
+        for i, name in enumerate(sessions, 1):
+            active = " *" if name == manager.get_active() else ""
+            print(f"  {i}. {name}{active}")
 
     elif cmd == "/new":
         if not arg:
@@ -322,18 +342,22 @@ def _handle_command(
 
     elif cmd == "/switch":
         if not arg:
-            print("用法: /switch <名字>")
+            print("用法: /switch <名字|序号>")
             return None
-        if manager.load(arg) is None:
-            print(REPL_NOT_FOUND.format(name=arg))
+        target = _resolve_target(manager, arg)
+        if target is None:
+            print(f"Session 不存在: {arg}")
+            return None
+        if manager.load(target) is None:
+            print(REPL_NOT_FOUND.format(name=target))
             return None
         # 当前 session 聊过才保存；没聊过不落盘（不产生多余文件）
         if session.messages:
             session.save(manager.base_dir)
         # 切换
-        manager.set_active(arg)
-        new_session = manager.load(arg)
-        print(REPL_SWITCHED.format(name=arg))
+        manager.set_active(target)
+        new_session = manager.load(target)
+        print(REPL_SWITCHED.format(name=target))
         return new_session
 
     elif cmd == "/delete":
