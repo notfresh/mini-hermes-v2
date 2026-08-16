@@ -221,9 +221,11 @@ def run_repl(
     name = _choose_session(manager, sessions)
     session = manager.load(name)
     if session is None:
-        session = manager.create(name)
+        # 纯内存创建：未开始聊天不落盘，第一条对话时才持久化
+        session = Session(name=name)
         print(REPL_CREATED.format(name=name))
-    manager.set_active(name)
+    else:
+        manager.set_active(name)
 
     # 3. REPL 循环
     while True:
@@ -239,13 +241,18 @@ def run_repl(
         # 退出命令
         if user_input.lower() in ("/exit", "/quit"):
             print("退出 REPL。")
-            session.save(manager.base_dir)
-            print(REPL_SAVED)
+            if session.messages:
+                session.save(manager.base_dir)
+                print(REPL_SAVED)
+            else:
+                print("未开始聊天，未保存。再见！")
             break
         
         # 处理命令
         if user_input.startswith("/"):
-            _handle_command(user_input, session, manager, loop)
+            new_session = _handle_command(user_input, session, manager, loop)
+            if new_session is not None:
+                session = new_session
             continue
 
 
@@ -256,8 +263,9 @@ def run_repl(
             initial_messages=session.messages,
         )
 
-        # 保存结果到 session
+        # 保存结果到 session（第一次真实对话才注册索引 + 落盘，幂等）
         session.messages = result.get("messages", [])
+        manager.create(session.name)
         session.save(manager.base_dir)
 
         # 显示回复
@@ -288,8 +296,13 @@ def _handle_command(
     session: Session,
     manager: SessionManager,
     loop: "ConversationLoop",
-) -> None:
-    """处理 REPL 命令"""
+) -> Optional[Session]:
+    """处理 REPL 命令
+
+    返回：
+        新 session 或 None。/new、/switch 切换了当前 session 时返回新 session，
+        REPL 主循环据此更新提示符名字；其余命令返回 None。
+    """
     parts = user_input.split(maxsplit=1)
     cmd = parts[0]
     arg = parts[1] if len(parts) > 1 else None
@@ -301,30 +314,32 @@ def _handle_command(
     elif cmd == "/new":
         if not arg:
             print("用法: /new <名字>")
-            return
-        session = manager.create(arg)
-        manager.set_active(arg)
-        session.save(manager.base_dir)
+            return None
+        # 纯内存创建：未开始聊天不落盘，第一条对话时才持久化
+        new_session = Session(name=arg)
         print(REPL_CREATED.format(name=arg))
+        return new_session
 
     elif cmd == "/switch":
         if not arg:
             print("用法: /switch <名字>")
-            return
+            return None
         if manager.load(arg) is None:
             print(REPL_NOT_FOUND.format(name=arg))
-            return
-        # 先保存当前 session
-        session.save(manager.base_dir)
+            return None
+        # 当前 session 聊过才保存；没聊过不落盘（不产生多余文件）
+        if session.messages:
+            session.save(manager.base_dir)
         # 切换
         manager.set_active(arg)
-        session = manager.load(arg)
+        new_session = manager.load(arg)
         print(REPL_SWITCHED.format(name=arg))
+        return new_session
 
     elif cmd == "/delete":
         if not arg:
             print("用法: /delete <名字>")
-            return
+            return None
         if manager.delete(arg):
             print(REPL_DELETED.format(name=arg))
         else:
@@ -336,3 +351,4 @@ def _handle_command(
     else:
         print(f"未知命令: {cmd}")
         print(REPL_HELP)
+    return None
