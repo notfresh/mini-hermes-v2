@@ -22,6 +22,7 @@ import sys
 from conversation_loop import ConversationLoop
 from llm_client import LLMClient
 from loop_controller import LoopController
+from agent_ignore import AgentIgnore
 import tools  # noqa: F401  # import 即触发 @tool 注册
 import plan_mode  # noqa: F401  # Plan Mode：注册 enter/exit_plan_mode 工具
 from plan_mode import plan_guard  # 守卫：规划模式激活时限制 write
@@ -122,6 +123,8 @@ def main() -> None:
     if args.interactive:
         from session_manager import run_repl
         tools_runner = ToolRunner(verbose=args.verbose)
+        # AgentIgnore：路径级权限校验（当前工作目录下的 .agentignore，无文件则不启用）
+        tools_runner.agent_ignore = AgentIgnore.load_default()
         tools_runner.guard = plan_guard  # Plan Mode V2：注入守卫（硬约束）
         llm = LLMClient(
             model=args.model,
@@ -157,6 +160,8 @@ def main() -> None:
 
     # ── 组装五模块 ──
     tools_runner = ToolRunner(verbose=args.verbose)
+    # AgentIgnore：路径级权限校验（当前工作目录下的 .agentignore，无文件则不启用）
+    tools_runner.agent_ignore = AgentIgnore.load_default()
     tools_runner.guard = plan_guard  # Plan Mode V2：注入守卫（硬约束）
     llm = LLMClient(
         model=args.model,

@@ -141,6 +141,8 @@ class ToolRunner:
         self.verbose = verbose
         # Plan Mode V2：守卫检查点（None = 不检查）。由 CLI 注入 plan_guard。
         self.guard = None
+        # AgentIgnore：路径级权限校验（R/W/X，None = 不检查）。由 CLI 注入。
+        self.agent_ignore = None
 
     # ── 供循环/提示词使用的只读接口 ────────────────────────────────────
 
@@ -211,6 +213,16 @@ class ToolRunner:
         # 对应 Kimi plan-mode-guard-deny：deny 发生在工具执行前，模型收到错误结果
         if self.guard is not None:
             reason = self.guard(fn_name, fn_args)
+            if reason:
+                content = f"错误：{reason}"
+                if self.verbose:
+                    print(f"     🚫 {content}")
+                return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+
+        # AgentIgnore：路径级权限校验（R 读 / W 写 / X 执行），deny 语义
+        # 路径命中规则时，对应权限被排除；若工具需要的权限已被排除 → 拒绝（工具不执行），错误 Observation 回填给 LLM
+        if self.agent_ignore is not None:
+            reason = self.agent_ignore.check_tool(fn_name, fn_args)
             if reason:
                 content = f"错误：{reason}"
                 if self.verbose:
