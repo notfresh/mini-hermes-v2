@@ -87,7 +87,7 @@ class LLMClient:
                 t0 = time.time()
                 resp = self._client.chat.completions.create(
                     model=self.model,
-                    messages=messages,
+                    messages=_strip_origin(messages),
                     tools=tools if tools else None,
                     temperature=0.7,
                 )
@@ -151,3 +151,18 @@ def normalize_assistant_message(msg: Any) -> dict:
             for tc in msg.tool_calls
         ]
     return entry
+
+
+def _strip_origin(messages: list[dict]) -> list[dict]:
+    """发给 API 前去掉内部标记字段（origin），只留 OpenAI 认识的字段。
+
+    技能框架挂载后，注入的 system 消息带 {"origin": {"kind": "injection", ...}}
+    标记用于会话恢复检测——但 API 不认这个字段，发送前必须剥离
+    （对应生产环境：序列化/传输层的字段白名单过滤）。
+    """
+    cleaned = []
+    for m in messages:
+        if "origin" in m:
+            m = {k: v for k, v in m.items() if k != "origin"}
+        cleaned.append(m)
+    return cleaned

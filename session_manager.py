@@ -34,15 +34,18 @@ REPL_CHOOSE = "请选择 [1-{count}] 或输入新名字创建: "
 REPL_PROMPT = "[{name}] 💬 "
 
 REPL_HELP = """/new <名字>   - 新建 session
-/switch <名字> - 切换 session
+/switch <名字|序号> - 切换 session（序号需先 /list 查看）
 /list          - 列出所有 session
 /delete <名字> - 删除 session
+/plan          - 手动进入规划模式（Plan Mode：只读调研 + 只能写计划文件）
+/run           - 退出规划模式，开始执行计划
 /exit, /quit   - 退出"""
 
 REPL_SAVED = "会话已保存。再见！"
 REPL_CREATED = "已创建 session: {name}"
 REPL_SWITCHED = "已切换到 session: {name}"
 REPL_DELETED = "已删除 session: {name}"
+REPL_HISTORY_EMPTY = "（该 session 暂无可打印的对话历史）"
 REPL_NOT_FOUND = "Session 不存在: {name}"
 
 
@@ -141,6 +144,15 @@ class SessionManager:
             self._save_index({"sessions": sessions, "active": name})
         return Session(name=name)
 
+    def add_session(self, session: Session) -> Session:
+        """添加已有 session"""
+        index = self._ensure_index()
+        sessions = index.get("sessions", [])
+        if session.name not in sessions:
+            sessions.append(session.name)
+            self._save_index({"sessions": sessions, "active": session.name})
+        return session
+
     def load(self, name: str) -> Optional[Session]:
         """加载已有 session"""
         path = self.sessions_dir / f"{name}.json"
@@ -187,8 +199,13 @@ def run_repl(
     llm: "LLMClient",
     verbose: bool = False,
     max_turns: int = 10,
+    skills: "Optional[SkillRegistry]" = None,
 ) -> None:
-    """REPL 主循环"""
+    """REPL 主循环
+
+    Args:
+        skills: 技能注册表（技能框架挂载点；None = 不启用）
+    """
     from conversation_loop import ConversationLoop
     from loop_controller import LoopController
 
@@ -198,6 +215,7 @@ def run_repl(
         llm=llm,
         tools=tools_runner,
         controller=controller,
+        skills=skills,
         verbose=verbose,
     )
 
@@ -214,11 +232,16 @@ def run_repl(
     # 2. 获取用户选择
     name = _choose_session(manager, sessions)
     session = manager.load(name)
+    
     if session is None:
-        session = manager.create(name)
+        # 纯内存创建：未开始聊天不落盘，第一条对话时才持久化
+        session = Session(name=name)
+        
         print(REPL_CREATED.format(name=name))
-    manager.set_active(name)
-
+    else:
+        _print_history(session) 
+        manager.set_active(name)
+        
     # 3. REPL 循环
     while True:
         try:
@@ -233,13 +256,39 @@ def run_repl(
         # 退出命令
         if user_input.lower() in ("/exit", "/quit"):
             print("退出 REPL。")
-            session.save(manager.base_dir)
-            print(REPL_SAVED)
+            if session.messages:
+                session.save(manager.base_dir)
+                print(REPL_SAVED)
+            else:
+                print("未开始聊天，未保存。再见！")
             break
-        
+
+        # Plan Mode 命令：用户手动进入/退出规划模式（人类介入入口）
+        if user_input.lower() == "/plan":
+            from plan_mode import plan_mode
+            try:
+                path = plan_mode.enter()
+                print(f"📋 已进入规划模式，计划文件：{path}")
+                print("   现在描述任务，让模型调研并写计划（规划模式下只能写计划文件）。")
+                print("   规划完成后输入 /run 退出规划模式，开始执行。")
+            except RuntimeError:
+                print(f"⚠️ 已在规划模式中（计划文件：{plan_mode.plan_path}），用 /run 退出。")
+            continue
+
+        if user_input.lower() == "/run":
+            from plan_mode import plan_mode
+            if plan_mode.is_active:
+                plan_mode.exit()
+                print("▶️ 已退出规划模式，所有工具恢复可用。开始执行计划。")
+            else:
+                print("ℹ️ 当前不在规划模式（输入 /plan 进入）。")
+            continue
+
         # 处理命令
         if user_input.startswith("/"):
-            _handle_command(user_input, session, manager, loop)
+            new_session = _handle_command(user_input, session, manager, loop)
+            if new_session is not None:
+                session = new_session
             continue
 
 
@@ -249,9 +298,12 @@ def run_repl(
             user_message=user_input,
             initial_messages=session.messages,
         )
-
-        # 保存结果到 session
+        
+        # 保存结果到 session（第一次真实对话才注册索引 + 落盘，幂等）
+        session = manager.add_session(session)
         session.messages = result.get("messages", [])
+        session.updated_at = datetime.now().isoformat()
+        session.add_message("assistant", result.get("final_response", "")) # 保存 assistant 回复
         session.save(manager.base_dir)
 
         # 显示回复
@@ -277,48 +329,95 @@ def _choose_session(manager: SessionManager, sessions: list[str]) -> str:
         return choice
 
 
+def _resolve_target(manager: SessionManager, ref: str) -> Optional[str]:
+    """把 /switch 的参数解析成 session 名。
+
+    参数是纯数字时，按 manager.list() 的 1 起始序号映射（与 /list 一致）；
+    否则视为名字原样返回。序号越界或映射不到时返回 None。
+    """
+    if not ref.isdigit():
+        return ref
+    sessions = manager.list()
+    idx = int(ref) - 1
+    if 0 <= idx < len(sessions):
+        return sessions[idx]
+    return None
+
+
+def _print_history(session: Session) -> None:
+    """打印某 session 的对话历史（只展示 user/assistant，隐藏工具/系统轮次）。"""
+    shown = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+    if not shown:
+        print(REPL_HISTORY_EMPTY)
+        return
+    print(f"── 历史对话 ({len(shown)} 条) ──")
+    for i, m in enumerate(shown, 1):
+        role = "💬" if m.get("role") == "user" else "🤖"
+        content = m.get("content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        print(f"  [{i}] {role}: {content}")
+
+
 def _handle_command(
     user_input: str,
     session: Session,
     manager: SessionManager,
     loop: "ConversationLoop",
-) -> None:
-    """处理 REPL 命令"""
+) -> Optional[Session]:
+    """处理 REPL 命令
+
+    返回：
+        新 session 或 None。/new、/switch 切换了当前 session 时返回新 session，
+        REPL 主循环据此更新提示符名字；其余命令返回 None。
+    """
     parts = user_input.split(maxsplit=1)
     cmd = parts[0]
     arg = parts[1] if len(parts) > 1 else None
 
     if cmd == "/list":
         sessions = manager.list()
-        print("可用的 sessions:", ", ".join(sessions) or "（无）")
+        if not sessions:
+            print(REPL_NO_SESSIONS)
+            return None
+        for i, name in enumerate(sessions, 1):
+            active = " *" if name == manager.get_active() else ""
+            print(f"  {i}. {name}{active}")
 
     elif cmd == "/new":
         if not arg:
             print("用法: /new <名字>")
-            return
-        session = manager.create(arg)
-        manager.set_active(arg)
-        session.save(manager.base_dir)
+            return None
+        # 纯内存创建：未开始聊天不落盘，第一条对话时才持久化
+        new_session = Session(name=arg)
         print(REPL_CREATED.format(name=arg))
+        return new_session
 
     elif cmd == "/switch":
         if not arg:
-            print("用法: /switch <名字>")
-            return
-        if manager.load(arg) is None:
-            print(REPL_NOT_FOUND.format(name=arg))
-            return
-        # 先保存当前 session
-        session.save(manager.base_dir)
+            print("用法: /switch <名字|序号>")
+            return None
+        target = _resolve_target(manager, arg)
+        if target is None:
+            print(f"Session 不存在: {arg}")
+            return None
+        if manager.load(target) is None:
+            print(REPL_NOT_FOUND.format(name=target))
+            return None
+        # 当前 session 聊过才保存；没聊过不落盘（不产生多余文件）
+        if session.messages:
+            session.save(manager.base_dir)
         # 切换
-        manager.set_active(arg)
-        session = manager.load(arg)
-        print(REPL_SWITCHED.format(name=arg))
+        manager.set_active(target)
+        new_session = manager.load(target)
+        print(REPL_SWITCHED.format(name=target))
+        _print_history(new_session)
+        return new_session
 
     elif cmd == "/delete":
         if not arg:
             print("用法: /delete <名字>")
-            return
+            return None
         if manager.delete(arg):
             print(REPL_DELETED.format(name=arg))
         else:
@@ -330,3 +429,4 @@ def _handle_command(
     else:
         print(f"未知命令: {cmd}")
         print(REPL_HELP)
+    return None

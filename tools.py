@@ -24,6 +24,35 @@ import subprocess
 from tool_runner import tool
 
 
+# ── 技能框架：load_skill 工具（挂载点）──────────────────────────────────
+# 对应 Hermes tools/skills_tool.py 的 skill_view：按需加载技能全文。
+# registry 由 CLI 启动时注入（SkillRegistry 实例）。
+
+_registry: "SkillRegistry | None" = None
+
+
+def set_registry(registry: "SkillRegistry") -> None:
+    """由 CLI 注入技能注册表（load_skill 工具的背后实现）。"""
+    global _registry
+    _registry = registry
+
+
+@tool(description="加载一个技能（skill）的完整内容。技能是经过验证的工作方法，包含强制步骤和 Red Flags 检查表。调用后必须严格按技能流程执行。可用技能列表见系统提示词的 <available_skills> 块。")
+def load_skill(name: str) -> str:
+    """Load a skill's full content.
+
+    Args:
+        name: 技能名，如 'brainstorming'、'systematic-debugging'
+    """
+    if _registry is None:
+        return "Error: 技能系统未启用（未注入 SkillRegistry）"
+    content = _registry.load(name)
+    if content is None:
+        available = ", ".join(s["name"] for s in _registry.list_skills())
+        return f"Error: 技能 '{name}' 不存在。可用技能: {available}"
+    return content
+
+
 # ── 内置工具（传承 V1）─────────────────────────────────────────────────────
 
 
