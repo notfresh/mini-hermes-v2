@@ -37,6 +37,8 @@ REPL_HELP = """/new <名字>   - 新建 session
 /switch <名字|序号> - 切换 session（序号需先 /list 查看）
 /list          - 列出所有 session
 /delete <名字> - 删除 session
+/plan          - 手动进入规划模式（Plan Mode：只读调研 + 只能写计划文件）
+/run           - 退出规划模式，开始执行计划
 /exit, /quit   - 退出"""
 
 REPL_SAVED = "会话已保存。再见！"
@@ -260,7 +262,28 @@ def run_repl(
             else:
                 print("未开始聊天，未保存。再见！")
             break
-        
+
+        # Plan Mode 命令：用户手动进入/退出规划模式（人类介入入口）
+        if user_input.lower() == "/plan":
+            from plan_mode import plan_mode
+            try:
+                path = plan_mode.enter()
+                print(f"📋 已进入规划模式，计划文件：{path}")
+                print("   现在描述任务，让模型调研并写计划（规划模式下只能写计划文件）。")
+                print("   规划完成后输入 /run 退出规划模式，开始执行。")
+            except RuntimeError:
+                print(f"⚠️ 已在规划模式中（计划文件：{plan_mode.plan_path}），用 /run 退出。")
+            continue
+
+        if user_input.lower() == "/run":
+            from plan_mode import plan_mode
+            if plan_mode.is_active:
+                plan_mode.exit()
+                print("▶️ 已退出规划模式，所有工具恢复可用。开始执行计划。")
+            else:
+                print("ℹ️ 当前不在规划模式（输入 /plan 进入）。")
+            continue
+
         # 处理命令
         if user_input.startswith("/"):
             new_session = _handle_command(user_input, session, manager, loop)
