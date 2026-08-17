@@ -219,8 +219,8 @@ class ToolRunner:
                     print(f"     🚫 {content}")
                 return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
-        # AgentIgnore：路径级权限校验（R 读 / W 写 / X 执行）
-        # 命中规则且权限不足 → 拒绝（工具不执行），错误 Observation 回填给 LLM
+        # AgentIgnore：路径级权限校验（R 读 / W 写 / X 执行），deny 语义
+        # 路径命中规则时，对应权限被排除；若工具需要的权限已被排除 → 拒绝（工具不执行），错误 Observation 回填给 LLM
         if self.agent_ignore is not None:
             reason = self.agent_ignore.check_tool(fn_name, fn_args)
             if reason:

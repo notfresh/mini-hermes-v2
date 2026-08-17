@@ -7,20 +7,20 @@ Hermes 对应: 无（Hermes 工具执行无路径级权限控制）
 Kimi 对应:   packages/agent-core/src/permission/policies/*（deny 守卫）
 
 职责：
-- 解析 AgentIgnore 配置文件（默认 ~/.minimal-agent-v2/AgentIgnore）
-- 工具调用前校验路径权限（R 读 / W 写 / X 执行），命中规则且权限不足即拒绝
+- 解析 AgentIgnore 配置文件（默认当前工作目录下的 .agentignore）
+- 工具调用前校验路径权限（R 读 / W 写 / X 执行），命中规则即排除该路径上的对应权限（deny 语义，对齐文件命名 ignore）
 
 AgentIgnore 语法（每行一条规则）：
     绝对路径::权限码
 
-    权限码 = 允许的权限（R/W/X 组合），缺哪个字母就禁止哪个操作：
+    权限码 = 要排除（禁止）的权限（R/W/X 组合），列出哪些就禁哪些：
         /home/user/.ssh::            完全禁止（不可读/写/执行）
-        /home/user/private::R       只允许读（禁止写、禁止执行）
-        /tmp/sandbox::WX            允许写和执行，禁止读
+        /tmp/sandbox::R             禁止读（允许写、执行）
+        /data/backup::X             禁止执行（允许读、写）
 
-匹配规则（第一版，做减法）：
+匹配规则（第一版，做减法累加）：
 - 规则路径是目标路径的前缀（目录规则覆盖整棵子树），文件规则精确匹配
-- 多条规则取权限交集：父目录禁止的权限，子目录规则加不回来（不做"开小窗"）
+- 多条规则叠加取差集：从全权限 RWX 中减去所有命中规则列出的权限，越叠越严
 - 无规则命中 = 默认全允许（不改变 V2 现有行为）
 
 设计文档：docs/design-20260817-agent-ignore.md
@@ -73,7 +73,7 @@ class AgentIgnore:
     """
 
     def __init__(self, rules: list[tuple[str, frozenset]]):
-        # rules: [(归一化绝对路径, 允许的权限集)]，保持文件顺序
+        # rules: [(归一化绝对路径, 要排除的权限集)]，保持文件顺序
         self.rules = rules
 
     # ── 加载 ────────────────────────────────────────────────────────────
@@ -99,16 +99,24 @@ class AgentIgnore:
             if not perms.issubset(_PERM_CHARS):
                 print(f"⚠️ AgentIgnore:{line_no}: 权限码只允许 R/W/X，忽略: {raw!r}")
                 continue
+            # if not os.path.isabs(rule_path): # 绝对路径检查暂时不强制，避免用户误伤
+            #     print(f"⚠️ AgentIgnore:{line_no}: 路径必须是绝对路径，忽略: {raw!r}")
+            #     continue
             if not os.path.isabs(rule_path):
-                print(f"⚠️ AgentIgnore:{line_no}: 路径必须是绝对路径，忽略: {raw!r}")
+                rule_path = _norm(rule_path)  # 相对路径 → 绝对路径（相对于 CWD）
+            if not os.path.exists(rule_path):
+                print(f"⚠️ AgentIgnore:{line_no}: 路径不存在，忽略: {raw!r}")
                 continue
             rules.append((_norm(rule_path), frozenset(perms)))
         return cls(rules)
 
     @classmethod
     def load_default(cls) -> Optional["AgentIgnore"]:
-        """加载默认位置 ~/.minimal-agent-v2/AgentIgnore；文件不存在返回 None。"""
-        path = Path("~/.minimal-agent-v2/AgentIgnore").expanduser()
+        """加载当前工作目录下的 .agentignore；文件不存在返回 None。
+
+        由 cli.py 作为启动入口调用，CWD 已是用户的项目根目录。
+        """
+        path = Path.cwd() / ".agentignore"
         if not path.is_file():
             return None
         return cls.load(path)
@@ -116,15 +124,15 @@ class AgentIgnore:
     # ── 判定 ────────────────────────────────────────────────────────────
 
     def allowed_perms(self, path: str) -> frozenset:
-        """目标路径的最终允许权限 = 所有前缀命中规则的权限交集（做减法）。
+        """目标路径的最终允许权限 = 从全权限中减去所有前缀命中规则声明的权限。
 
-        无命中 = 全允许；命中的规则越多，权限越收窄。
+        无命中 = 全允许；每命中一条规则，就把规则声明的权限从 allowed 中剔除。
         """
         abs_path = _norm(path)
         allowed = set(_ALL_PERMS)
         for rule_path, rule_perms in self.rules:
             if abs_path == rule_path or abs_path.startswith(rule_path + os.sep):
-                allowed &= rule_perms
+                allowed = allowed - rule_perms
         return frozenset(allowed)
 
     def check_path(self, path: str, perm: str) -> Optional[str]:
