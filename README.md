@@ -1,101 +1,132 @@
-# MinimalAgentV2 — 五模块拆分的 Agent 框架
+# MinimalAgentV2
 
-从 Hermes Agent 核心循环（`agent/conversation_loop.py`，5194 行）剥离的教学级框架。
-V2 在 V1 基础上按"5 模块拆分"重构：核心骨架保持 ~30 行，防御逻辑全部下沉到模块。
+从 **Hermes**（15 万行 Python 生产级 Agent）核心执行循环中提取的 Agent 框架：
+**30 行核心骨架，五模块架构**，并实现 Plan Mode 硬约束、AgentIgnore 权限系统与技能插口。
 
-## 与 Hermes 的对照
+Agent 的本质是 `LLM + Tools + Loop`。Hermes 的核心执行函数 `run_conversation`
+有 5194 行，其中驱动 agent 工作的主循环只有 30 行：**问模型 → 有工具请求则执行并回填
+→ 无工具请求则返回**。其余 4300 多行，是让它在真实世界不崩的防御。
 
-| V2 模块 | 文件 | Hermes 对应 |
-|---------|------|-------------|
-| `ConversationLoop`（骨架） | conversation_loop.py | agent/conversation_loop.py :: run_conversation（5194 行） |
-| `TurnContext` | turn_context.py | agent/turn_context.py + agent/prompt_builder.py |
-| `LoopController` | loop_controller.py | agent/iteration_budget.py + 循环退出条件 |
-| `LLMClient` | llm_client.py | agent/chat_completion_helpers.py（重试/退避/错误分类） |
-| `ToolRunner` | tool_runner.py | tools/registry.py + agent/tool_executor.py |
-| `MessageStore` | message_store.py | 循环内 messages 操作（压缩/快照/持久化） |
-| 内置工具 | tools.py | tools/file_tools.py + tools/terminal_tool.py |
-| CLI | cli.py | cli.py main() |
+本项目把这条主链完整提取出来，按职责拆成五个模块，防御逻辑全部下沉到模块内部，
+让骨架保持可读；再在这个骨架上长出三层生产级机制：Plan Mode 硬约束、
+AgentIgnore 权限控制、外部技能插口。
 
-## 核心骨架（conversation_loop.py :: ConversationLoop.run）
+## 核心特性
 
-```python
-while self.controller.should_continue():          # 还继续吗？→ LoopController
-    response = self.llm.complete(messages.all())  # 发请求 → LLMClient（重试在内）
-    assistant = normalize_assistant_message(...)
-    if assistant.get("tool_calls"):
-        results = self.tools.execute_all(...)     # 执行 → ToolRunner
-        for r in results: messages.append(r)      # 回填 → MessageStore
-        continue
-    return self._success_result(...)              # 无工具调用 → 最终回答
+### 1. 五模块拆分，骨架 30 行
+
+核心循环只回答「下一步做什么」，五个模块各回答一个问题：
+
+| 模块 | 回答的问题 |
+|------|-----------|
+| `LoopController` | 还继续吗（轮数 / 预算 / 中断 / grace） |
+| `LLMClient` | 模型说什么（重试 / 退避 / 错误分类） |
+| `ToolRunner` | 工具结果是什么（查找 / 解析 / 守卫 / 回填） |
+| `MessageStore` | 消息放哪、太长怎么办（增删改查 / 压缩） |
+| `TurnContext` | 回合开始前准备什么（系统提示词 / 清洗 / 凭证预检） |
+
+每个模块都能在 Hermes 源码中找到对应的实现，对照表见 [CORE.md](CORE.md)。
+模块划分不是凭空设计，是逆向提取的产物。
+
+### 2. Plan Mode：用代码守卫强制规划纪律
+
+`/plan` 进入规划模式后，规划期间对业务文件的写入会被守卫**直接拒绝（DENIED）**。
+约束不依赖提示词自觉，而是框架层的强制检查；模型读到拒绝信息后会自我纠正，
+自动退出规划模式再正常执行。
+
+软约束（提示词）与硬约束（代码守卫）的对比，是理解「谁在强制、靠什么强制」的
+最直接演示，配套对照 demo 见 [`hard-vs-soft-mode/`](hard-vs-soft-mode/)。
+
+### 3. AgentIgnore：工具的文件系统权限控制
+
+类似 `.gitignore` 的声明文件，每行 `绝对路径::权限码` 控制该路径允许哪些操作
+（R / W / X 子集）。匹配采用前缀 + 权限交集：**父目录禁止的权限，子目录加不回来**。
+读、写、执行三类工具统一过校验，拒绝时错误回填给模型——不崩溃、模型可见、可纠正。
+
+### 4. 技能插口：宿主与技能包解耦
+
+技能内容完全外置，独立的技能包（Superpowers 式）通过 `--skills-dir` 挂载。
+会话开始自动注入技能索引与总开关，`load_skill` 按需加载技能全文。不挂任何技能包时
+行为与原生一致。宿主约定、注入与去重设计均有文档。
+
+### 5. 交互模式与会话管理
+
+两种入口：单轮 `python3 cli.py "问题"`，或 `python3 cli.py -i` 进入 REPL
+交互模式。REPL 提供完整的 slash 命令：
+
+```
+/new <名字>    新建会话        /plan   进入规划模式（只读调研 + 只能写计划文件）
+/switch <名字> 切换会话        /run    退出规划模式，开始执行
+/list          列出全部会话    /approve 批准当前计划（plan 模式）
+/delete <名字> 删除会话        /revise <反馈> 按反馈修改计划
+/exit /quit    退出           /cancel 取消计划并退出 plan 模式
 ```
 
-## 五模块各自回答的问题
+会话管理采用**延迟落盘**：新会话聊了第一条真实消息才写盘，没聊过就走不产生任何文件；
+每个会话独立 JSON 文件，会话之间零共享、零锁——多任务并发的隔离哲学是
+「给每个人一个房子」。
 
-1. **LoopController** — "还继续吗？"（轮数/预算/中断/grace）
-2. **LLMClient** — "模型说什么？"（重试/退避/错误分类，调用方看不到）
-3. **ToolRunner** — "工具结果是什么？"（查找/解析/防御/回填）
-4. **MessageStore** — "消息放哪/太长怎么办？"（增删改查/压缩）
-5. **TurnContext** — "回合开始前准备什么？"（系统提示词/清洗/凭证预检）
-
-## 使用
+## 快速开始
 
 ```bash
-# 列工具
-python3 cli.py --list-tools
+git clone git@github.com:notfresh/mini-hermes-v2.git
+cd mini-hermes-v2
+export DEEPSEEK_API_KEY=sk-xxx        # OpenAI 兼容接口
 
-# 单轮提问
-export DEEPSEEK_API_KEY=sk-xxx
-python3 cli.py "现在几点？"
+python3 cli.py --list-tools                            # 列内置工具
+python3 cli.py "现在几点？"                             # 单轮提问
+python3 cli.py "计算 (123+456)*2，然后读取 /etc/hostname"  # 触发工具调用
+python3 cli.py -v "列出当前目录"                        # 看每一轮的 token 与消息
 
-# 触发工具调用（会走 核心循环 → ToolRunner → 回填 → 再问）
-python3 cli.py "计算 (123+456)*2，然后读取 /etc/hostname"
-
-# 详细调试
-python3 cli.py -v "列出当前目录"
-
-# 技能框架模式（挂载外部技能包 minimal-superpowers）
-python3 cli.py --skills-dir ../minimal-superpowers/skills "Let's make a react todo list" -v
+# 交互模式（REPL：多会话 + /plan /run 等 slash 命令）
+python3 cli.py -i
 ```
 
-## 技能框架插口（skills-framework 分支）
+## 项目结构
 
-V2 作为宿主提供**通用技能插口**（对应 Hermes 的 `skills.external_dirs` + `skill_view` 工具），
-技能内容完全外置——独立的 [MinimalSuperPowers](https://github.com/ 技能包
-（蒸馏自 obra/superpowers + kimi-code）通过 `--skills-dir` 挂载：
-
-```bash
-git clone <minimal-superpowers-url> ../minimal-superpowers   # 单独下载技能包
-python3 cli.py --skills-dir ../minimal-superpowers/skills "Let's make a react todo list"
+```
+minimal-agent-v2/
+├── conversation_loop.py   # 核心循环骨架（30 行）
+├── loop_controller.py     # 轮数 / 预算 / 中断控制
+├── llm_client.py          # 重试 / 退避 / 错误分类
+├── tool_runner.py         # 工具查找 / 解析 / 守卫 / 回填
+├── tools.py               # @tool 注册中心 + 内置工具
+├── message_store.py       # 消息增删改查 / 压缩
+├── turn_context.py        # 回合准备：系统提示词 / 凭证预检
+├── session_manager.py     # REPL 会话生命周期与持久化
+├── plan_mode.py           # Plan Mode 状态机 + 守卫
+├── agent_ignore.py        # AgentIgnore 路径权限校验
+├── skill_registry.py      # 外部技能包扫描 / 注入
+├── cli.py                 # 入口：单轮 / REPL / 调试
+└── hard-vs-soft-mode/     # 软 / 硬约束对照 demo
 ```
 
-**宿主约定**（对应 Superpowers 的 invariants）：
-1. 挂载的技能目录注入 `<available_skills>` 索引（Hermes 式：只列 name+description）
-2. 技能包自带 `using-superpowers` 时，会话开始自动注入总开关全文
-   （Superpowers 式：`<EXTREMELY_IMPORTANT>` + 1% 规则 + Red Flags）——只注入一次
-3. `load_skill` 工具按需加载技能全文（对应 Hermes `skill_view`）
+## 边界
 
-**插口实现**（五模块骨架不动）：
-- `TurnContext.build_initial_messages`：接收技能索引 + 总开关全文，拼进 system prompt
-- `ConversationLoop`：可选 `skills` 参数；`_build_bootstrap()` 约定检测 + 注入去重
-- `skill_registry.py`：扫描外部目录 + frontmatter + `has_bootstrap()` 检测
-- `llm_client.complete`：发送前剥离内部 `origin` 标记（会话恢复检测用）
+本项目定位是教学与研究级实现：模型、网络、key 都正常时，它能完整展示 agent
+的工作原理与上述机制。生产环境需要的凭证轮换、provider fallback、流式输出、
+并发执行、LLM 摘要压缩等防御层，被**有意省略**——每一层都是设计上的取舍，
+不是疏漏，逐项明细见 [v2.WHAT-WAS-DISCARDED.md](v2.WHAT-WAS-DISCARDED.md)。
 
-**去重设计**（来自 kimi 源码）：`_bootstrap_injected` 标记 + 消息里
-`origin.kind == "injection"` 检测（REPL 会话恢复场景），压缩/清除后重置。
+## 档案导航
 
-不挂任何技能包 = V2 原版行为（`--no-skills` 也可显式关闭）。
+- **[CORE.md](CORE.md)** — 核心执行模型、五模块 ↔ Hermes 源码对照、蒸馏方法论（如何从 5194 行剥出 30 行）
+- **[v2.WHAT-WAS-DISCARDED.md](v2.WHAT-WAS-DISCARDED.md)** — 逐项丢弃清单：砍掉的 85% 是什么、为什么
+- **[docs/](docs/)** — 设计决策档案（Plan Mode 三版递进、AgentIgnore、多任务并发路线图等）
 
-## 传承关系
+## 传承
 
-- V1（minimal-agent/）：单文件 `agent_loop()`，核心循环 + 工具 + CLI 都在一个函数里
-- V2（本目录）：五模块拆分，骨架 30 行，防御下沉
-- 相同点：@tool 装饰器、内置工具集、CLI 参数、DeepSeek 优先
+- **V1**（`minimal-agent/`）：单文件实现，`agent_loop()` 一个函数装下核心循环 + 工具 + CLI
+- **V2**（本仓库）：五模块工程化，并在骨架上实现 Plan Mode / AgentIgnore / 技能插口 / 会话管理
+- **Hermes**：本项目的一切设计均有源码出处——它是 Hermes 核心思维的最小完整继承
 
-## 扩展方向（对应 Hermes 进阶机制）
+## 路线图
 
-- [ ] 流式输出（Hermes: _interruptible_streaming_api_call）
-- [ ] 并发工具执行（Hermes: _execute_tool_calls_concurrent）
-- [ ] 凭证自动轮换（Hermes: _ensure_runtime_credentials）
-- [ ] 上下文 LLM 摘要压缩（Hermes: context_compressor）
-- [ ] 记忆读写（Hermes: memory_manager）
-- [ ] 子代理分发（Hermes: delegate_tool）
+每个勾选 = 亲手重建一层 Hermes 的真实防御（详见 [CORE.md](CORE.md) §5）：
+
+- [ ] 流式输出
+- [ ] 并发工具执行
+- [ ] 凭证自动轮换
+- [ ] 上下文 LLM 摘要压缩
+- [ ] 记忆读写
+- [ ] 子代理分发
