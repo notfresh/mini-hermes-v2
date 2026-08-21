@@ -56,6 +56,8 @@ def build_system_prompt(tool_schemas: list[dict], personality: str = "", skills_
     base += """
 
 复杂任务规划规则：
+0. 进入规划模式前先自评需求清晰度——若模糊（目标/范围/验收标准不明确），
+   主动用对话/AskUserQuestion 向用户澄清关键问题，再 enter_plan_mode
 1. 遇到多步骤、多文件或需要设计决策的任务，先调用 enter_plan_mode 进入规划模式
 2. 进入后：用只读工具调研 → 用 write 把计划写入计划文件（每个阶段含：明确目标 + 可执行的验收条件）
 3. 规划模式下只能写入计划文件，写其他文件会被守卫拒绝（必须先 exit_plan_mode）
@@ -126,3 +128,25 @@ def check_credentials(api_key: str, base_url: str) -> tuple[bool, str]:
     if not base_url:
         return False, "缺少 base_url"
     return True, ""
+
+
+def plan_status_line() -> str:
+    """生成当前规划模式状态注入文本（模型可见，V3 审批闭环）。
+
+    规划模式激活时返回一段状态描述，供 REPL 拼在用户消息前；
+    未激活返回空串。状态在框架内存（plan_mode.status），模型通过这段
+    注入文本感知——状态不是靠模型"记住"的。
+
+    对应 Hermes/Kimi：规划状态注入 agent 上下文（plan mode 提示词动态拼装）。
+    """
+    from plan_mode import plan_mode
+
+    if not plan_mode.is_active or plan_mode.plan_path is None:
+        return ""
+    return (
+        f"【框架状态】当前处于规划模式（{plan_mode.status_label}）。"
+        f"计划文件：{plan_mode.plan_path}\n"
+        "规则：只允许只读调研与写入计划文件（write_plan）；"
+        "调用 exit_plan_mode 前必须先获得用户 /approve 批准，"
+        "否则会被守卫拒绝。\n\n"
+    )
