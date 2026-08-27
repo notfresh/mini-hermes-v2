@@ -312,7 +312,7 @@ def run_repl(
         session = manager.add_session(session)
         session.messages = result.get("messages", [])
         session.updated_at = datetime.now().isoformat()
-        session.add_message("assistant", result.get("final_response", "")) # 保存 assistant 回复
+        # 注意：result["messages"] 已包含完整的 assistant 回复，无需额外 add_message
         session.save(manager.base_dir) # @持久化
 
         # 显示回复
