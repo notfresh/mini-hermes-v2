@@ -1,0 +1,2 @@
+model = "deepseek-reasoner"
+max_turns = 200

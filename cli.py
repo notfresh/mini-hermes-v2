@@ -18,11 +18,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from conversation_loop import ConversationLoop
 from llm_client import LLMClient
 from loop_controller import LoopController
 from agent_ignore import AgentIgnore
+import config  # noqa: F401  # 配置文件加载
 import tools  # noqa: F401  # import 即触发 @tool 注册
 import plan_mode  # noqa: F401  # Plan Mode：注册 enter/exit_plan_mode 工具
 from plan_mode import plan_guard  # 守卫：规划模式激活时限制 write
@@ -57,21 +59,29 @@ def _resolve_api_key(base_url: str) -> str:
     return ""
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(defaults: dict = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="MinimalAgentV2 — 五模块拆分的教学级 Agent 框架",
     )
+    # 配置文件参数（最早解析，用于获取默认配置）
+    parser.add_argument("--config", type=str, default="",
+                        help="指定配置文件路径（默认: 查找项目/.minimal-agent-v2.toml 或 ~/.minimal-agent-v2/config.toml）")
+
+    # 解析配置文件获取默认值
+    cfg = defaults or {}
+
     parser.add_argument("message", nargs="?", help="用户消息")
-    parser.add_argument("--model", default="deepseek-chat",
+    parser.add_argument("--model", default=cfg.get("model", "deepseek-chat"),
                         help="模型名 (默认: deepseek-chat)")
     parser.add_argument("--provider", choices=["deepseek", "openai"],
-                        default="deepseek",
+                        default=cfg.get("provider", "deepseek"),
                         help="快捷选择 API endpoint")
     parser.add_argument("--base-url", default="",
                         help="API base URL (覆盖 --provider)")
-    parser.add_argument("--max-turns", type=int, default=10,
-                        help="最大工具调用轮次 (默认: 10)")
+    parser.add_argument("--max-turns", type=int, default=cfg.get("max_turns", 10),
+                        help="最大工具调用轮次")
     parser.add_argument("--verbose", "-v", action="store_true",
+                        default=cfg.get("verbose", False),
                         help="打印详细调试信息")
     parser.add_argument("--list-tools", action="store_true",
                         help="列出已注册的工具")
@@ -79,9 +89,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="追加到系统提示词的性格/约束描述")
     parser.add_argument("--no-skills", action="store_true",
                         help="禁用技能框架（回到无技能的 V2 原版行为）")
-    parser.add_argument("--skills-dir", default="",
-                        help="挂载外部技能包目录（如 ../minimal-superpowers/skills；"
-                             "自带 using-superpowers 时自动注入总开关）")
+    parser.add_argument("--skills-dir", default=cfg.get("skills_dir", ""),
+                        help="挂载外部技能包目录")
     parser.add_argument("-i", "--interactive", action="store_true",
                         help="交互模式（REPL）")
     return parser
@@ -97,7 +106,21 @@ def _print_skills(skills: SkillRegistry) -> None:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
+    # 从命令行直接获取 --config 参数（避免解析顺序问题）
+    config_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+
+    # 加载配置
+    if config_path:
+        cfg = config.load_config(config_path=Path(config_path))
+    else:
+        cfg = config.load_config()
+
+    # 用配置作为默认值构建完整解析器
+    args = _build_parser(defaults=cfg).parse_args()
 
     # ── 解析 provider ──
     base_url = args.base_url or {
@@ -132,11 +155,12 @@ def main() -> None:
             api_key=api_key,
             verbose=args.verbose,
         )
-        # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）
+        # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）TODO 待清除
         skills = None if (args.no_skills or not args.skills_dir) else SkillRegistry(args.skills_dir)
         if skills is not None:
             tools.set_registry(skills)
             _print_skills(skills)
+            
         run_repl(
             tools_runner=tools_runner,
             llm=llm,

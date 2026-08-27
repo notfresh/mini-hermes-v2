@@ -209,6 +209,15 @@ def run_repl(
     Args:
         skills: 技能注册表（技能框架挂载点；None = 不启用）
     """
+    # 启用 readline 支持：使方向键(↑↓←→)可正常识别
+    try:
+        import readline
+    except ImportError:
+        try:
+            import pyreadline as readline  # Windows 备选
+        except ImportError:
+            pass  # 无 readline 时降级为普通 input()
+
     from conversation_loop import ConversationLoop
     from loop_controller import LoopController
 
@@ -304,7 +313,7 @@ def run_repl(
         session.messages = result.get("messages", [])
         session.updated_at = datetime.now().isoformat()
         session.add_message("assistant", result.get("final_response", "")) # 保存 assistant 回复
-        session.save(manager.base_dir)
+        session.save(manager.base_dir) # @持久化
 
         # 显示回复
         print(f"🤖: {result['final_response']}")
