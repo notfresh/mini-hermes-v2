@@ -170,6 +170,9 @@ def _run_plugin_command(argv: list[str]) -> None:
     p_remove = sub.add_parser("remove", help="删除插件的 managed copy")
     p_remove.add_argument("id", help="plugin id")
 
+    p_info = sub.add_parser("info", help="展示插件 manifest 元信息（commit 2/4）")
+    p_info.add_argument("id", help="plugin id")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "install":
@@ -185,5 +188,9 @@ def _run_plugin_command(argv: list[str]) -> None:
             print(f"{r['id']:<24} {(r['ref'] or '-'):<16} {('yes' if r['present'] else 'NO'):<8} {r['url']}")
     elif args.cmd == "remove":
         remove(args.id)
+    elif args.cmd == "info":
+        # commit 2：委托 plugin_manifest.info_command
+        import plugin_manifest
+        plugin_manifest.info_command(args.id)
     else:
         parser.print_help()
