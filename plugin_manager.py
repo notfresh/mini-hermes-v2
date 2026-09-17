@@ -173,6 +173,9 @@ def _run_plugin_command(argv: list[str]) -> None:
     p_info = sub.add_parser("info", help="展示插件 manifest 元信息（commit 2/4）")
     p_info.add_argument("id", help="plugin id")
 
+    p_tools = sub.add_parser("tools", help="加载并展示插件 lib/*.py 加载的模块（commit 4/4 兼容未来 Python-first plugin）")
+    p_tools.add_argument("id", help="plugin id")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "install":
@@ -192,5 +195,9 @@ def _run_plugin_command(argv: list[str]) -> None:
         # commit 2：委托 plugin_manifest.info_command
         import plugin_manifest
         plugin_manifest.info_command(args.id)
+    elif args.cmd == "tools":
+        # commit 4：委托 plugin_tools.tools_command
+        import plugin_tools
+        plugin_tools.tools_command(args.id)
     else:
         parser.print_help()
