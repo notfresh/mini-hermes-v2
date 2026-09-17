@@ -100,9 +100,31 @@ class MessageStore:
         if self.approximate_tokens() <= max_tokens:
             return False
 
-        # 保留 system（第 0 条）+ 最近的 8 条，丢掉中间的
-        head = self._messages[:1]          # system
-        tail = self._messages[-8:]         # 最近的 8 条
+        # 保留 system（第 0 条）+ 最近的 N 条，丢掉中间的
+        # 但要保证 assistant + tool 配对完整（不把 tool 消息跟它的 assistant 拆散）
+        head = self._messages[:1]  # system
+
+        # 从后往前收集，碰到 assistant 且有 tool_calls 时，多保留它的 tool 结果
+        tail: list[dict] = []
+        i = len(self._messages) - 1
+        while i >= 0 and len(tail) < 12:  # 收集更多一些，确保配对完整
+            msg = self._messages[i]
+            tail.insert(0, msg)
+            # 如果这个 assistant 有 tool_calls，把对应的 tool 结果也包含进来
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                # 往前找对应的 tool 消息
+                tool_call_ids = {tc["id"] for tc in msg["tool_calls"]}
+                j = i - 1
+                while j >= 0 and len(tail) < 20:
+                    prev = self._messages[j]
+                    if prev.get("role") == "tool" and prev.get("tool_call_id") in tool_call_ids:
+                        tail.insert(0, prev)
+                        tool_call_ids.discard(prev.get("tool_call_id"))
+                        if not tool_call_ids:
+                            break
+                    j -= 1
+            i -= 1
+
         dropped = len(self._messages) - len(head) - len(tail)
         self._messages = head + tail
         if dropped > 0:
