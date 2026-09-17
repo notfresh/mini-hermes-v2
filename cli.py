@@ -96,6 +96,25 @@ def _build_parser(defaults: dict = None) -> argparse.ArgumentParser:
     return parser
 
 
+def _collect_plugin_skills_dirs() -> list[str]:
+    """扫 ~/.minimal-agent-v2/plugins/managed/<id>/skills/ —— 收集所有已装 plugin 的 skills 目录。
+
+    commit 3 协议：每个 plugin 自己的 skills/ 都会被 SkillRegistry 索引。
+    找不到任何 plugin 的 skills/ 时返回空列表（向后兼容）。
+    """
+    import plugin_manager
+    out: list[str] = []
+    if not plugin_manager.MANAGED_DIR.is_dir():
+        return out
+    for plugin_dir in sorted(plugin_manager.MANAGED_DIR.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        skills_dir = plugin_dir / "skills"
+        if skills_dir.is_dir():
+            out.append(str(skills_dir))
+    return out
+
+
 def _print_skills(skills: SkillRegistry) -> None:
     """打印已挂载的技能清单（技能框架模式启动时显示）。"""
     print(f"\n🧠 技能框架已挂载 ({len(skills.list_skills())} 个技能):")
@@ -161,8 +180,19 @@ def main() -> None:
             api_key=api_key,
             verbose=args.verbose,
         )
-        # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）TODO 待清除
-        skills = None if (args.no_skills or not args.skills_dir) else SkillRegistry(args.skills_dir)
+        # 技能框架挂载（commit 3 协议）：
+        #   - --skills-dir 是用户显式指定的外部技能包（向后兼容）
+        #   - 自动追加每个已装 plugin 的 <managed>/skills/，每个 plugin
+        #     的 bootstrap skill 都会被 SkillRegistry.bootstraps() 列出
+        import plugin_manager
+        plugin_skills_dirs = _collect_plugin_skills_dirs()
+        skills = None
+        if not (args.no_skills or (not args.skills_dir and not plugin_skills_dirs)):
+            skills_dirs = []
+            if args.skills_dir:
+                skills_dirs.append(args.skills_dir)
+            skills_dirs.extend(plugin_skills_dirs)
+            skills = SkillRegistry(skills_dirs=skills_dirs)
         if skills is not None:
             tools.set_registry(skills)
             _print_skills(skills)
@@ -200,8 +230,16 @@ def main() -> None:
         verbose=args.verbose,
     )
     controller = LoopController(max_turns=args.max_turns, verbose=args.verbose)
-    # 技能框架挂载：--skills-dir 指向外部技能包（如 minimal-superpowers）
-    skills = None if (args.no_skills or not args.skills_dir) else SkillRegistry(args.skills_dir)
+    # 技能框架挂载（commit 3 协议，详见上方 _run_conversation_mode 注释）
+    import plugin_manager
+    plugin_skills_dirs = _collect_plugin_skills_dirs()
+    skills = None
+    if not (args.no_skills or (not args.skills_dir and not plugin_skills_dirs)):
+        skills_dirs = []
+        if args.skills_dir:
+            skills_dirs.append(args.skills_dir)
+        skills_dirs.extend(plugin_skills_dirs)
+        skills = SkillRegistry(skills_dirs=skills_dirs)
     if skills is not None:
         tools.set_registry(skills)
         _print_skills(skills)

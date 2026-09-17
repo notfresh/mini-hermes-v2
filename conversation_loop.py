@@ -24,12 +24,13 @@ Hermes 对应: agent/conversation_loop.py 的 run_conversation()
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any, Optional
 
 from llm_client import LLMClient, LLMError, normalize_assistant_message
 from loop_controller import LoopController
 from message_store import MessageStore
-from skill_registry import BOOTSTRAP_SKILL, SkillRegistry
+from skill_registry import SkillRegistry
 from tool_runner import ToolRunner
 from turn_context import build_initial_messages, sanitize_user_message
 
@@ -151,32 +152,34 @@ class ConversationLoop:
     def _build_bootstrap(self) -> str:
         """生成"技能总开关"文本；本会话已注入过则返回空串。
 
-        约定优于配置：外部技能包若自带 bootstrap 技能，
-        宿主就在会话开始时把它注入（<EXTREMELY_IMPORTANT> 包裹），
-        强制模型"先查技能再行动"。对应：
+        约定优于配置：外部技能包若自带 bootstrap 技能（commit 3 协议：
+        任何 using-* 前缀），宿主就在会话开始时把它注入
+        （<EXTREMELY_IMPORTANT> 包裹），强制模型"先查技能再行动"。
+        多 plugin 时每个 bootstrap 都注入，按 plugin name 字典序排列。
+        对应：
           - Superpowers hooks/session-start（bootstrap 注入脚本）
           - Kimi Code plugin-session-start.ts（sessionStart 技能注入）
         去重：_bootstrap_injected 标记 + 会话恢复时消息里的 origin 标记。
         """
         if self.skills is None or self._bootstrap_injected:
             return ""
-        if not self.skills.has_bootstrap():
+
+        bootstraps = self.skills.bootstraps()
+        if not bootstraps:
             return ""
-        content = self.skills.load(BOOTSTRAP_SKILL)
-        if content is None:
-            return ""
+
         self._bootstrap_injected = True
-        return (
+        out = (
             "<EXTREMELY_IMPORTANT>\n"
-            "You have superpowers.\n"
-            "\n"
-            "Below is the full content of your 'superpowers:using-superpowers' "
-            "skill — your introduction to using skills. "
-            "For all other skills, use the load_skill tool:\n"
-            "\n"
-            f"{content}\n"
-            "</EXTREMELY_IMPORTANT>"
+            "You have plugin bootstrap skills installed.\n"
+            "Below is the full content of each plugin's 'using-*' skill — these "
+            "are your introductions to using those plugins' capabilities.\n\n"
         )
+        for bs in bootstraps:
+            content = pathlib.Path(bs["path"]).read_text(encoding="utf-8")
+            out += f"--- {bs['name']} ---\n{content}\n\n"
+        out += "</EXTREMELY_IMPORTANT>"
+        return out
 
     # ── 结果组装 ────────────────────────────────────────────────────────
 

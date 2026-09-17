@@ -77,7 +77,8 @@ def build_initial_messages(
     tool_schemas: list[dict],
     system_prompt_override: str | None = None,
     personality: str = "",
-    skill_bootstrap: str = "",
+    skill_bootstrap: str = "",  # 向后兼容：单字符串（superpowers 老协议）
+    skill_bootstraps: list[str] | None = None,  # 新协议（commit 3）：多 bootstrap 列表
     skills_index: str = "",
 ) -> list[dict]:
     """组装回合初始 messages：system + user。
@@ -85,11 +86,24 @@ def build_initial_messages(
     Hermes 对应: build_turn_context() 返回的 ctx.messages。
     教学版原版固定两段（system + user）；挂载技能框架时：
       - skills_index:   技能索引（<available_skills> 块）拼进系统提示词
-      - skill_bootstrap:"技能总开关"全文拼进系统提示词（Superpowers 式启动注入）
+      - skill_bootstrap / skill_bootstraps:
+                        "技能总开关"全文拼进系统提示词（Superpowers 式启动注入）
+                        多 bootstrap（commit 3 协议：每个 plugin 自己的 using-*）
+                        按传入顺序逐一拼接，新协议优先。
     """
     system_prompt = system_prompt_override or build_system_prompt(tool_schemas, personality, skills_index)
-    if skill_bootstrap:
-        system_prompt = system_prompt + "\n\n" + skill_bootstrap
+
+    # 新协议：多 bootstrap 优先；老协议（单字符串）向后兼容
+    bootstraps: list[str] = []
+    if skill_bootstraps:
+        bootstraps = list(skill_bootstraps)
+    elif skill_bootstrap:
+        bootstraps = [skill_bootstrap]
+
+    for bs in bootstraps:
+        if bs:
+            system_prompt = system_prompt + "\n\n" + bs
+
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
