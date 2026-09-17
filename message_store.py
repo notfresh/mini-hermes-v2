@@ -95,43 +95,84 @@ class MessageStore:
         Hermes 对应: _compress_context() + context_compressor — 真正的压缩
         是 LLM 摘要旧消息。教学版用"丢中间"近似，原理一致：保住头尾。
 
+        关键约束（commit 5 修）：tool 消息必须随其 assistant 一起丢或留，
+        绝不能产生孤儿 —— OpenAI/DeepSeek 都拒绝'role=tool 但没
+        对应 tool_calls'的消息，会报 'tool must be a response to a
+        preceding message with tool_calls'。
+
+        算法：先按"块"切分（每个块 = 一个 assistant[+tool_calls] + N 个
+        tool + 0+ 个 user/assistant 收尾），压缩时按块丢，保留尾部
+        最近的 K 个完整块 + system 头。
+
         Returns: 是否发生了压缩。
         """
         if self.approximate_tokens() <= max_tokens:
             return False
 
-        # 保留 system（第 0 条）+ 最近的 N 条，丢掉中间的
-        # 但要保证 assistant + tool 配对完整（不把 tool 消息跟它的 assistant 拆散）
+        # 1. 找 assistant + tool_calls 的位置，把消息切成'块'
+        # 块定义：[block_start, block_end] 包含一个完整对话回合
+        #   - block_start = assistant 消息（含 tool_calls 或纯文本）
+        #   - block_end   = 该 assistant 之后的下一个 user 或 assistant 之前
+        # 简化：直接用消息流的索引边界
         head = self._messages[:1]  # system
+        body = self._messages[1:]
 
-        # 从后往前收集，碰到 assistant 且有 tool_calls 时，多保留它的 tool 结果
-        tail: list[dict] = []
-        i = len(self._messages) - 1
-        while i >= 0 and len(tail) < 12:  # 收集更多一些，确保配对完整
-            msg = self._messages[i]
-            tail.insert(0, msg)
-            # 如果这个 assistant 有 tool_calls，把对应的 tool 结果也包含进来
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                # 往前找对应的 tool 消息
-                tool_call_ids = {tc["id"] for tc in msg["tool_calls"]}
-                j = i - 1
-                while j >= 0 and len(tail) < 20:
-                    prev = self._messages[j]
-                    if prev.get("role") == "tool" and prev.get("tool_call_id") in tool_call_ids:
-                        tail.insert(0, prev)
-                        tool_call_ids.discard(prev.get("tool_call_id"))
-                        if not tool_call_ids:
-                            break
-                    j -= 1
-            i -= 1
+        # 2. 找出所有 tool 消息对应的 assistant 位置
+        # tool 消息不能独立存在 —— 必须跟它前面的 assistant[tool_calls] 一起
+        # 用 '块' 的视角：一个 assistant(tool_calls) + 它的 N 个 tool 消息是一个原子单元
+        atomic_blocks: list[list[dict]] = []
+        current_block: list[dict] = []
+        for msg in body:
+            role = msg.get("role")
+            if role == "assistant" and current_block:
+                # 新 assistant 消息 → 上一块结束
+                atomic_blocks.append(current_block)
+                current_block = [msg]
+            elif role == "assistant":
+                # 第一个 assistant
+                current_block = [msg]
+            elif role == "tool":
+                # tool 必须跟当前块（最近的 assistant）
+                if not current_block or current_block[-1].get("role") != "assistant" \
+                        or not current_block[-1].get("tool_calls"):
+                    # 孤儿 tool 消息 —— 防御性：合并到上一块或丢弃（教学版：保留）
+                    if current_block:
+                        current_block.append(msg)
+                    else:
+                        # body 第一个就是孤儿 tool —— 包成伪块，不丢
+                        atomic_blocks.append([msg])
+                else:
+                    current_block.append(msg)
+            else:
+                # user / 其他 → 跟当前块
+                if current_block:
+                    current_block.append(msg)
+                else:
+                    # body 开头是 user —— 包成伪块
+                    atomic_blocks.append([msg])
+        if current_block:
+            atomic_blocks.append(current_block)
 
-        dropped = len(self._messages) - len(head) - len(tail)
-        self._messages = head + tail
+        # 3. 保留尾部 K 个完整块
+        KEEP_TAIL_BLOCKS = 3
+        if len(atomic_blocks) <= KEEP_TAIL_BLOCKS:
+            # 不够丢 —— 啥都不做（让 max_tokens 限制起作用）
+            return False
+
+        kept_blocks = atomic_blocks[-KEEP_TAIL_BLOCKS:]
+        dropped = sum(len(b) for b in atomic_blocks[:-KEEP_TAIL_BLOCKS])
+
+        # 4. 重组：system + 提示 + 尾部 K 个完整块
+        new_messages = list(head)
         if dropped > 0:
-            self._messages.insert(1, {
+            new_messages.append({
                 "role": "system",
                 "content": f"[教学版压缩提示：已丢弃中间 {dropped} 条历史消息]",
             })
+        for block in kept_blocks:
+            new_messages.extend(block)
+
+        self._messages = new_messages
         return True
 
     # ── 调试 ─────────────────────────────────────────────────────────────
