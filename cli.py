@@ -106,6 +106,12 @@ def _print_skills(skills: SkillRegistry) -> None:
 
 
 def main() -> None:
+    # ── plugin 子命令早期 dispatch（不走 _build_parser，避免影响主对话流程）──
+    if len(sys.argv) >= 2 and sys.argv[1] == "plugin":
+        import plugin_manager
+        plugin_manager._run_plugin_command(sys.argv[2:])
+        return
+
     # 从命令行直接获取 --config 参数（避免解析顺序问题）
     config_path = None
     for i, arg in enumerate(sys.argv):
