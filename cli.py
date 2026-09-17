@@ -61,7 +61,9 @@ def _resolve_api_key(base_url: str) -> str:
 
 def _build_parser(defaults: dict = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="MinimalAgentV2 — 五模块拆分的教学级 Agent 框架",
+        description="MinimalAgentV2 — 五模块拆分的教学级 Agent 框架\n"
+                    "Plugin 管理子命令：`v2 plugin install/list/remove/info/tools <id>`\n"
+                    "  （plugin 子命令走早期 dispatch，不在 -h 里展开 —— 用 `v2 plugin -h`）",
     )
     # 配置文件参数（最早解析，用于获取默认配置）
     parser.add_argument("--config", type=str, default="",
