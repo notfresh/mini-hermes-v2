@@ -45,8 +45,9 @@ AgentIgnore 权限控制、外部技能插口。
 ### 4. 技能插口：宿主与技能包解耦
 
 技能内容完全外置，独立的技能包（Superpowers 式）通过 `--skills-dir` 挂载。
-会话开始自动注入技能索引与总开关，`load_skill` 按需加载技能全文。不挂任何技能包时
-行为与原生一致。宿主约定、注入与去重设计均有文档。
+会话开始自动注入技能索引与总开关，`load_skill` 按需加载技能全文。V2 插件子系统
+（`plugin_manager / plugin_manifest / plugin_tools / plugin_hooks`）负责插件的安装卸载、
+元信息加载、工具发现和 session-start hook 执行。不挂任何技能包时行为与原生一致。
 
 ### 5. 交互模式与会话管理
 
@@ -67,24 +68,57 @@ AgentIgnore 权限控制、外部技能插口。
 
 ## 快速开始
 
-```bash
-git clone git@github.com:notfresh/mini-hermes-v2.git
-cd mini-hermes-v2
-export DEEPSEEK_API_KEY=sk-xxx        # OpenAI 兼容接口
+### 一键安装（推荐）
 
-python3 cli.py --list-tools                            # 列内置工具
-python3 cli.py "现在几点？"                             # 单轮提问
-python3 cli.py "计算 (123+456)*2，然后读取 /etc/hostname"  # 触发工具调用
-python3 cli.py -v "列出当前目录"                        # 看每一轮的 token 与消息
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/notfresh/mini-hermes-v2/main/install.sh)"
+```
+
+或克隆后本地安装：
+
+```bash
+git clone https://github.com/notfresh/mini-hermes-v2.git
+cd mini-hermes-v2
+./install-local.sh          # 写入 ~/.local/bin/mini-hermes
+```
+
+### 前置准备
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"   # 未加到 shell 配置时需要
+export DEEPSEEK_API_KEY=sk-xxx        # OpenAI 兼容接口
+```
+
+### 运行
+
+```bash
+mini-hermes --list-tools                                   # 列内置工具
+mini-hermes "现在几点？"                                   # 单轮提问
+mini-hermes "计算 (123+456)*2，然后读取 /etc/hostname"     # 触发工具调用
+mini-hermes -v "列出当前目录"                               # 看每一轮的 token 与消息
 
 # 交互模式（REPL：多会话 + /plan /run 等 slash 命令）
-python3 cli.py -i
+mini-hermes -i
+```
+
+### 项目内调试
+
+```bash
+cd minimal-agent-v2
+source .venv/bin/activate               # 进入虚拟环境
+export DEEPSEEK_API_KEY=sk-xxx
+
+python3 cli.py "你好"                    # 直接跑，无需安装
+python3 cli.py -v "..."                 # verbose 调试模式
+python3 cli.py -i                       # REPL 交互模式
 ```
 
 ## 项目结构
 
 ```
 minimal-agent-v2/
+├── install.sh             # curl 一键安装脚本
+├── install-local.sh       # 本地已有项目时安装 mini-hermes 命令
 ├── conversation_loop.py   # 核心循环骨架（30 行）
 ├── loop_controller.py     # 轮数 / 预算 / 中断控制
 ├── llm_client.py          # 重试 / 退避 / 错误分类
@@ -97,6 +131,11 @@ minimal-agent-v2/
 ├── agent_ignore.py        # AgentIgnore 路径权限校验
 ├── skill_registry.py      # 外部技能包扫描 / 注入
 ├── cli.py                 # 入口：单轮 / REPL / 调试
+├── plugin_manager.py      # V2 插件管理（install/remove/list）
+├── plugin_manifest.py     # V2 插件 manifest 加载器
+├── plugin_tools.py        # V2 插件 tools 加载器
+├── plugin_hooks.py        # V2 插件 hook 执行器
+├── config.py              # 配置文件加载
 └── hard-vs-soft-mode/     # 软 / 硬约束对照 demo
 ```
 
