@@ -1,0 +1,145 @@
+# Layer 1: module/file distribution — plugin subsystem
+# 4 files: plugin_manager.py, plugin_manifest.py, plugin_tools.py, plugin_hooks.py
+# 1 consumer: cli.py
+
+# ── File nodes ──────────────────────────────────────────────────────────────
+
+[[nodes]]
+id = "file.plugin_manager"
+kind = "file"
+path = "plugin_manager.py"
+layer = "capability"
+desc = "Plugin manager — install/remove/list + record of V2 plugins. Exposes MANAGED_DIR, INSTALLED_FILE, _run_plugin_command"
+
+[[nodes]]
+id = "file.plugin_manifest"
+kind = "file"
+path = "plugin_manifest.py"
+layer = "capability"
+desc = "Plugin manifest loader — parses PluginManifest from plugin directory; uses plugin_manager.MANAGED_DIR"
+
+[[nodes]]
+id = "file.plugin_tools"
+kind = "file"
+path = "plugin_tools.py"
+layer = "capability"
+desc = "Plugin tools loader — discovers Python tools from plugins; uses plugin_manager.MANAGED_DIR, INSTALLED_FILE"
+
+[[nodes]]
+id = "file.plugin_hooks"
+kind = "file"
+path = "plugin_hooks.py"
+layer = "capability"
+desc = "Plugin hook executor — runs session-start hooks (shell + Python); uses plugin_manager.MANAGED_DIR, INSTALLED_FILE"
+
+[[nodes]]
+id = "file.cli"
+kind = "file"
+path = "cli.py"
+layer = "entry"
+desc = "CLI entrypoint — installs plugins and delegates to plugin_manager._run_plugin_command"
+
+# ── Layer 1 edges: CONTAINS (file → function) ───────────────────────────────
+
+[[edges]]
+from = "file.plugin_manager"
+to = "func.plugin_manager.install"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_manager"
+to = "func.plugin_manager.remove"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_manager"
+to = "func.plugin_manager.list_installed"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_manager"
+to = "func.plugin_manager._run_plugin_command"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_manifest"
+to = "func.plugin_manifest.load_manifest"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_manifest"
+to = "func.plugin_manifest.info_command"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_tools"
+to = "func.plugin_tools.tools_command"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_tools"
+to = "func.plugin_tools.load_all_plugin_tools"
+rel = "CONTAINS"
+
+[[edges]]
+from = "file.plugin_hooks"
+to = "func.plugin_hooks.run_session_start_hooks"
+rel = "CONTAINS"
+
+# ── Layer 1 edges: DEPENDS_ON (file → file, weight = import-count实测) ───────
+
+# plugin_hooks → plugin_manager  (1 import)
+[[edges]]
+from = "file.plugin_hooks"
+to = "file.plugin_manager"
+rel = "DEPENDS_ON"
+weight = 1
+
+# plugin_hooks → plugin_manifest  (2 imports: lines 101, 175)
+[[edges]]
+from = "file.plugin_hooks"
+to = "file.plugin_manifest"
+rel = "DEPENDS_ON"
+weight = 2
+
+# plugin_manifest → plugin_manager  (1 import)
+[[edges]]
+from = "file.plugin_manifest"
+to = "file.plugin_manager"
+rel = "DEPENDS_ON"
+weight = 1
+
+# plugin_tools → plugin_manager  (1 import)
+[[edges]]
+from = "file.plugin_tools"
+to = "file.plugin_manager"
+rel = "DEPENDS_ON"
+weight = 1
+
+# plugin_tools → plugin_manifest  (1 import)
+[[edges]]
+from = "file.plugin_tools"
+to = "file.plugin_manifest"
+rel = "DEPENDS_ON"
+weight = 1
+
+# plugin_manager → plugin_manifest  (1 import)
+[[edges]]
+from = "file.plugin_manager"
+to = "file.plugin_manifest"
+rel = "DEPENDS_ON"
+weight = 1
+
+# plugin_manager → plugin_tools  (1 import)
+[[edges]]
+from = "file.plugin_manager"
+to = "file.plugin_tools"
+rel = "DEPENDS_ON"
+weight = 1
+
+# cli → plugin_manager  (4 imports: lines 107, 132, 189, 236)
+[[edges]]
+from = "file.cli"
+to = "file.plugin_manager"
+rel = "DEPENDS_ON"
+weight = 4

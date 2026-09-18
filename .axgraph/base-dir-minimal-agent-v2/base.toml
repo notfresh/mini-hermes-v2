@@ -1,0 +1,12 @@
+[graph]
+name = "minimal-agent-v2"
+layer = "1"
+granularity = "module+file"
+created = "2026-09-18"
+schema = "axgraph-1.0"
+note = "auto-init via ax init"
+
+[source]
+path = "."
+repo = "/root/projects/minimal-agent-v2"
+type = "dir"

@@ -1,0 +1,191 @@
+# Layer 2: function-level calls within the plugin subsystem
+
+# ── Constants (plugin_manager.py) ───────────────────────────────────────────
+
+[[nodes]]
+id = "func.plugin_manager.MANAGED_DIR"
+kind = "constants"
+path = "plugin_manager.py:20"
+layer = "capability"
+desc = "Path to managed plugins directory (Path from config)"
+
+[[nodes]]
+id = "func.plugin_manager.INSTALLED_FILE"
+kind = "constants"
+path = "plugin_manager.py:21"
+layer = "capability"
+desc = "Path to installed-plugins JSON record file"
+
+# ── Functions ──────────────────────────────────────────────────────────────
+
+[[nodes]]
+id = "func.plugin_manager._run_plugin_command"
+kind = "function"
+path = "plugin_manager.py:157"
+layer = "capability"
+desc = "CLI subcommand dispatcher — delegates to plugin_manifest.info_command / plugin_tools.tools_command"
+
+[[nodes]]
+id = "func.plugin_manager.install"
+kind = "function"
+path = "plugin_manager.py:63"
+layer = "capability"
+desc = "Install a plugin from URL (git clone)"
+
+[[nodes]]
+id = "func.plugin_manager.remove"
+kind = "function"
+path = "plugin_manager.py:98"
+layer = "capability"
+desc = "Remove an installed plugin"
+
+[[nodes]]
+id = "func.plugin_manager.list_installed"
+kind = "function"
+path = "plugin_manager.py:111"
+layer = "capability"
+desc = "List all installed plugins"
+
+[[nodes]]
+id = "func.plugin_manifest.load_manifest"
+kind = "function"
+path = "plugin_manifest.py:103"
+layer = "capability"
+desc = "Load PluginManifest for a plugin id from its directory"
+
+[[nodes]]
+id = "func.plugin_manifest.info_command"
+kind = "function"
+path = "plugin_manifest.py:225"
+layer = "capability"
+desc = "Print plugin info (manifest fields + skills) to stdout"
+
+[[nodes]]
+id = "func.plugin_tools.tools_command"
+kind = "function"
+path = "plugin_tools.py:91"
+layer = "capability"
+desc = "Print available tools for a plugin to stdout"
+
+[[nodes]]
+id = "func.plugin_tools.load_all_plugin_tools"
+kind = "function"
+path = "plugin_tools.py:70"
+layer = "capability"
+desc = "Discover and return all tools across installed plugins"
+
+[[nodes]]
+id = "func.plugin_tools._installed_plugin_ids"
+kind = "function"
+path = "plugin_tools.py:82"
+layer = "capability"
+desc = "Read plugin ids from INSTALLED_FILE JSON"
+
+[[nodes]]
+id = "func.plugin_hooks.run_session_start_hooks"
+kind = "function"
+path = "plugin_hooks.py:129"
+layer = "capability"
+desc = "Run session-start hooks for all installed plugins (shell + Python)"
+
+[[nodes]]
+id = "func.plugin_hooks._installed_plugin_ids"
+kind = "function"
+path = "plugin_hooks.py:202"
+layer = "capability"
+desc = "Read plugin ids from INSTALLED_FILE JSON"
+
+# ── CALLS edges (at_line = 实测调用点行号) ────────────────────────────────────
+
+# plugin_manager._run_plugin_command → plugin_manifest.info_command
+[[edges]]
+from = "func.plugin_manager._run_plugin_command"
+to = "func.plugin_manifest.info_command"
+rel = "CALLS"
+at_line = 197
+
+# plugin_manager._run_plugin_command → plugin_tools.tools_command
+[[edges]]
+from = "func.plugin_manager._run_plugin_command"
+to = "func.plugin_tools.tools_command"
+rel = "CALLS"
+at_line = 201
+
+# plugin_hooks.run_session_start_hooks → plugin_manifest.load_manifest (first call)
+[[edges]]
+from = "func.plugin_hooks.run_session_start_hooks"
+to = "func.plugin_manifest.load_manifest"
+rel = "CALLS"
+at_line = 102
+
+# plugin_hooks.run_session_start_hooks → plugin_manifest.load_manifest (second call)
+[[edges]]
+from = "func.plugin_hooks.run_session_start_hooks"
+to = "func.plugin_manifest.load_manifest"
+rel = "CALLS"
+at_line = 176
+
+# plugin_tools.load_all_plugin_tools → plugin_manifest.load_manifest
+[[edges]]
+from = "func.plugin_tools.load_all_plugin_tools"
+to = "func.plugin_manifest.load_manifest"
+rel = "CALLS"
+at_line = 42
+
+# ── DEPENDS_ON edges (accesses constants) ───────────────────────────────────
+
+# plugin_manifest.load_manifest → plugin_manager.MANAGED_DIR (line 105)
+[[edges]]
+from = "func.plugin_manifest.load_manifest"
+to = "func.plugin_manager.MANAGED_DIR"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 105
+
+# plugin_hooks.run_session_start_hooks → plugin_manager.MANAGED_DIR (line 135)
+[[edges]]
+from = "func.plugin_hooks.run_session_start_hooks"
+to = "func.plugin_manager.MANAGED_DIR"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 135
+
+# plugin_tools.load_all_plugin_tools → plugin_manager.MANAGED_DIR (line 73)
+[[edges]]
+from = "func.plugin_tools.load_all_plugin_tools"
+to = "func.plugin_manager.MANAGED_DIR"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 73
+
+# plugin_tools._installed_plugin_ids → plugin_manager.INSTALLED_FILE (line 86)
+[[edges]]
+from = "func.plugin_tools._installed_plugin_ids"
+to = "func.plugin_manager.INSTALLED_FILE"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 86
+
+# plugin_tools.load_all_plugin_tools → plugin_manager.INSTALLED_FILE (line 83)
+[[edges]]
+from = "func.plugin_tools.load_all_plugin_tools"
+to = "func.plugin_manager.INSTALLED_FILE"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 83
+
+# plugin_hooks._installed_plugin_ids → plugin_manager.INSTALLED_FILE (line 206)
+[[edges]]
+from = "func.plugin_hooks._installed_plugin_ids"
+to = "func.plugin_manager.INSTALLED_FILE"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 206
+
+# plugin_hooks.run_session_start_hooks → plugin_manager.INSTALLED_FILE (line 204)
+[[edges]]
+from = "func.plugin_hooks.run_session_start_hooks"
+to = "func.plugin_manager.INSTALLED_FILE"
+rel = "DEPENDS_ON"
+weight = 1
+at_line = 204
