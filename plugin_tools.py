@@ -6,7 +6,7 @@ plugin_tools.py — V2 插件 tool 加载器（commit 4/4，兼容未来 Python-
   - import 副作用自动触发 @tool 装饰器注册到 V2 _TOOL_REGISTRY
   - 暴露 v2 plugin tools <id> 命令行：列出该 plugin 加载的模块
 
-重要事实（郑旭 2026-09-15 指出）：
+重要事实（2026-09-15）：
   axgraph 自己的 lib/*.py（graph_query / purity / diagnose /
   call_candidates / update_graph）是 CLI 依赖脚本，不是 @tool 装饰
   的 Python 函数。它们提供 `python3 bin/ax ...` CLI 接口，不直接
@@ -20,7 +20,7 @@ plugin_tools.py — V2 插件 tool 加载器（commit 4/4，兼容未来 Python-
     - 这种 plugin 现在还没有示例，但保留加载通路 + CLI 入口
       避免以后重新设计
 
-协议（2026-09-15 与郑旭讨论定稿）：
+协议（2026-09-15 讨论定稿）：
   - 加载路径：扫 ~/.minimal-agent-v2/plugins/managed/<id>/lib/*.py
   - 命名空间：每个 plugin 的 lib 单独占一个模块名空间
     ——例 axgraph 的 graph_query.py → _plugin_axgraph_graph_query

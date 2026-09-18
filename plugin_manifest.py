@@ -15,7 +15,7 @@ plugin_manifest.py — V2 插件 manifest 加载器（commit 2/4）
   - 不执行 hooks/*.sh（commit 4）
   - 不 importlib 加载 tools/*.py（commit 4）
 
-协议参考（2026-09-15 与郑旭讨论定稿）：
+协议参考（2026-09-15 讨论定稿）：
   - manifest 字段完全照搬 Claude Code plugin.json schema
   - Kimi 的 sessionStart.skill 字段 V2 不识别（静默忽略）
   - 第三方 plugin 也可自定义 pythonDependencies 块（V2 只读不写）

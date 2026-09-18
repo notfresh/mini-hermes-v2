@@ -6,7 +6,7 @@ plugin_manager.py — V2 插件管理（commit 1/4：managed copy + git clone）
   - 插件安装到 ~/.minimal-agent-v2/plugins/managed/<id>/（managed copy，隔离原仓库）
   - 装/卸/列表 三条命令；本 commit 只实现这三条，manifest 解析/skill 注入/tool 加载留后续 commit
 
-协议（按 2026-09-15 与郑旭讨论定稿）：
+协议（按 2026-09-15 讨论定稿）：
   - install/list/remove 命令通过 cli.py 的早期 dispatch 进入
   - 不依赖 pyproject.toml 或 v2 的现有 import 结构（纯 stdlib）
   - git clone 走 subprocess；不调 api.github.com（与 Kimi Code 一致，国内环境友好）

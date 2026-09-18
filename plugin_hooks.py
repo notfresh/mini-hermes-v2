@@ -8,7 +8,7 @@ plugin_hooks.py — V2 插件 hook 执行器（commit 4/4）
   - 两种 hook 都按 (plugin_id, event) 注册，返回的 stdout JSON 或
     Python 返回值都作为 'additionalContext' 拼进 system prompt
 
-协议（2026-09-15 与郑旭讨论定稿）：
+协议（2026-09-15 讨论定稿）：
   - shell hook 字段名（additionalContext）与 Claude Code 兼容
     —— 我们读 JSON 时优先 additionalContext，fallback additional_context
     （这两个在不同版本 Claude Code 上分别被读，不一致）
