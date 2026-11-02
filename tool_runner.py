@@ -127,6 +127,56 @@ def tool(name: str = "", description: str = ""):
     return decorator
 
 
+def register_external(
+    name: str,
+    description: str,
+    parameters: dict,
+    fn: Callable,
+) -> dict:
+    """注册一个**外部提供 schema** 的工具。
+
+    与 {@link tool} 装饰器的区别: schema 不从函数签名 / docstring 生成,
+    而是调用方直接给。用于"schema 的单一来源在宿主侧"的场景 ——
+    Android 集成里工具 schema 定义在 Java 的 AgentToolRegistry(跟 DAO 同源),
+    Python 侧启动时拉取后用本函数注入,避免手抄两份 schema;
+    A2A 适配器用它把远端 agent 暴露的能力挂进本地工具表。
+
+    Args:
+        name: 工具名
+        description: 工具描述(会进 LLM 的 tools 参数)
+        parameters: JSON Schema 的 parameters 部分
+            ({"type": "object", "properties": {...}, "required": [...]})
+        fn: 实际执行体,签名与 parameters 一致
+
+    Returns:
+        注册进 _TOOL_SCHEMAS 的 schema dict
+
+    **幂等**:同名工具重复注册会**替换**旧条目,而不是再 append 一份。
+    注册表是模块级全局的 —— 宿主每次启动 agent 内核都会重新注册一遍
+    (Android 侧每次 run() 都重新拉 schema)。不幂等的话,跑第 3 轮时
+    发给 LLM 的 tools 数组里会有 3 份同名工具,openai SDK 会报
+    "Duplicate function names"。
+    """
+    schema = {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+    _TOOL_REGISTRY[name] = {"fn": fn, "schema": schema}
+    # 幂等：同名工具替换旧 schema，不重复 append
+    # （_TOOL_SCHEMAS 是模块级全局，宿主反复注册会导致 tools 数组出现重名）
+    for i, existing in enumerate(_TOOL_SCHEMAS):
+        if existing.get("function", {}).get("name") == name:
+            _TOOL_SCHEMAS[i] = schema
+            break
+    else:
+        _TOOL_SCHEMAS.append(schema)
+    return schema
+
+
 # ── 工具执行器（V2 类化封装）───────────────────────────────────────────────
 
 
